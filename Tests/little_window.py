@@ -57,7 +57,7 @@ try:
     subprocess.run(["pbcopy"], input=b"before")
     press(8, "c", "cmd", "shift")
     t.ok("⌘⇧C copies the small window's address", paste() == f"{sv.BASE}/copied", paste())
-    t.ok("⌘⇧C says so in the small window", little("look")["said"] == "Address copied", little("look"))
+    t.ok("⌘⇧C says so in the small window", little("look")["said"] == "Link copied", little("look"))
     time.sleep(2)
     t.ok("and then stops saying it", little("look")["said"] == "")
 

@@ -45,7 +45,7 @@ private final class DuskHarness: NSObject, NSApplicationDelegate, WKScriptMessag
         var served = false
     }
 
-    private static let world = WKContentWorld.world(name: "Search")
+    private static let world = WKContentWorld.world(name: "roko")
     private var failures = 0
     private var told: [[String: Any]] = []
     /// As DuskRelay keeps them: the frames that asked, and whether the page
@@ -305,7 +305,7 @@ private final class DuskHarness: NSObject, NSApplicationDelegate, WKScriptMessag
 
     private static func constant(_ name: String, in file: String) -> String {
         let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let source = (try? String(contentsOf: here.appendingPathComponent("../Sources/Search/" + file), encoding: .utf8)) ?? ""
+        let source = (try? String(contentsOf: here.appendingPathComponent("../Sources/Roko/" + file), encoding: .utf8)) ?? ""
         guard let start = source.range(of: name + " = #\"\"\"\n"),
               let end = source.range(of: "\"\"\"#", range: start.upperBound..<source.endIndex) else {
             print("FAIL no \(name) in \(file)"); exit(1)

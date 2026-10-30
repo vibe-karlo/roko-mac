@@ -160,5 +160,5 @@ if __name__ == "__main__":
             sv.srv.shutdown()
     else:
         if sys.platform != "darwin":
-            sys.exit("Tests/popups.py requires macOS and a built Search.app")
+            sys.exit("Tests/popups.py requires macOS and a built roko.app")
         sys.exit(main())

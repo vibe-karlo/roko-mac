@@ -3,7 +3,7 @@
 popup), in a hidden probe.
 
 Build first (`./build.sh`), then `python3 Tests/extension_worker_fetch.py`.
-It runs a copy of build/Search.app under a bundle id of its own (WebKit stops
+It runs a copy of build/roko.app under a bundle id of its own (WebKit stops
 an extension's worker a few seconds after it starts under Search's real id
 in a test run), in a world of its own with split_view.py's harness, started
 hidden; the copy, its WebKit folders and the world are removed afterwards.
@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import split_view as sv  # noqa: E402
 
 sv.use("worker-fetch")
-BUNDLE = "com.officecommun.search.workerfetch"
+BUNDLE = "com.growthstudio.roko.mac.workerfetch"
 work = Path(tempfile.mkdtemp(prefix="search-workerfetch-"))
 
 FILES = {
@@ -73,12 +73,12 @@ if (navigator.serviceWorker.controller) {
 
 
 def probe_copy():
-    """build/Search.app under a bundle id of its own, signed ad hoc."""
-    app = work / "Search.app"
-    shutil.copytree(Path(sv.ROOT, "build", "Search.app"), app, symlinks=True)
+    """build/roko.app under a bundle id of its own, signed ad hoc."""
+    app = work / "roko.app"
+    shutil.copytree(Path(sv.ROOT, "build", "roko.app"), app, symlinks=True)
     subprocess.run(["/usr/libexec/PlistBuddy", "-c", f"Set :CFBundleIdentifier {BUNDLE}", str(app / "Contents/Info.plist")], check=True)
     (app / "Contents/embedded.provisionprofile").unlink(missing_ok=True)
-    subprocess.run(["codesign", "-f", "-s", "-", "--entitlements", str(Path(sv.ROOT, "Search.entitlements")), "--deep", str(app)],
+    subprocess.run(["codesign", "-f", "-s", "-", "--entitlements", str(Path(sv.ROOT, "roko.entitlements")), "--deep", str(app)],
                    check=True, capture_output=True)
     return str(app)
 

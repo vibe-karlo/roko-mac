@@ -44,7 +44,7 @@ BEFORE = {
     "passwords.fill": "fill", "passkeys": "passkeys", "passwords.apple": "apple passwords",
     "shield": "ads", "sites.keep": "tracking", "notifications.ask": "notifications",
     "links.peek": "peek", "links.peekClick": "peek", "autoscroll": "middle button",
-    "swipe.history": "swipe", "auto.install": "updates", "bench": "script",
+    "swipe.history": "swipe", "bench": "script",
     "autocorrect": "spelling",
     # Always on now: the find field says so.
     "splitView": "split", "tabs.groups": "groups", "panel.sites": "side panel",
@@ -68,16 +68,13 @@ def case_reachable(t):
     every = settings()
     items = every["items"]
     keys = {k for i in items for k in i["keys"]}
-    # The updates switch's key, as Updater names it.
-    install = next((i["keys"][0] for i in items if i["id"] == "updates.auto"), None)
     for key, words in BEFORE.items():
-        key = install if key == "auto.install" else key
         found = settings(find=words)["found"]
         hit = [i for i in found if key in i["keys"]]
         t.ok(f"“{words}” finds {key}", bool(hit), [i["id"] for i in found])
         if hit and key in ALWAYS:
             t.ok(f"…and says {key} is always there", hit[0]["note"] and hit[0]["findOnly"], hit[0])
-    t.ok("no key is left out of the rows", set(BEFORE) - {"auto.install"} <= keys, set(BEFORE) - keys)
+    t.ok("no key is left out of the rows", set(BEFORE) <= keys, set(BEFORE) - keys)
     # Every result names its section and group.
     found = settings(find="video")["found"]
     t.ok("results carry section and group", found and all(i["page"] and i["groupTitle"] for i in found), found)
@@ -86,11 +83,11 @@ def case_reachable(t):
     t.ok("about fifty rows in the sections", 45 <= len(shown) <= 70, len(shown))
     t.ok("ten sections", len(every["pages"]) == 10, every["pages"])
     # Old addresses land in the new sections.
-    sv.cmd({"do": "ui", "show": "search://settings/shortcuts"}); time.sleep(0.6)
-    t.ok("search://settings/shortcuts opens Keyboard & Mouse", settings()["settingsPage"] == "keyboard",
+    sv.cmd({"do": "ui", "show": "roko://settings/shortcuts"}); time.sleep(0.6)
+    t.ok("roko://settings/shortcuts opens Keyboard & Mouse", settings()["settingsPage"] == "keyboard",
          settings()["settingsPage"])
-    sv.cmd({"do": "ui", "show": "search://settings/downloads"}); time.sleep(0.6)
-    t.ok("search://settings/downloads opens General", settings()["settingsPage"] == "general")
+    sv.cmd({"do": "ui", "show": "roko://settings/downloads"}); time.sleep(0.6)
+    t.ok("roko://settings/downloads opens General", settings()["settingsPage"] == "general")
 
 
 def case_defaults(t):

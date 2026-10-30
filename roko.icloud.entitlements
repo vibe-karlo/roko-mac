@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- roko.entitlements' own: pages may ask for these. -->
+  <key>com.apple.security.device.camera</key><true/>
+  <key>com.apple.security.device.audio-input</key><true/>
+  <key>com.apple.security.personal-information.location</key><true/>
+  <!-- iCloud, as roko on iPhone has it (Browser/Sync.entitlements there):
+       the same container, so history is the same records on both
+       (Sync/CloudHistory.swift). Restricted: only with
+       roko.icloud.provisionprofile embedded, which build.sh does. -->
+  <key>com.apple.application-identifier</key><string>YOUR_TEAM_ID.com.growthstudio.roko.mac</string>
+  <key>com.apple.developer.team-identifier</key><string>YOUR_TEAM_ID</string>
+  <key>com.apple.developer.icloud-container-identifiers</key>
+  <array><string>iCloud.com.growthstudio.roko</string></array>
+  <key>com.apple.developer.icloud-services</key>
+  <array><string>CloudKit</string></array>
+  <key>com.apple.developer.aps-environment</key><string>development</string>
+</dict>
+</plist>

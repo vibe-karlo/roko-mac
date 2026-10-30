@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """./bench for a coding agent: an MCP server over the bench's socket.
 
-    claude mcp add search-bench -- /path/to/Search/bench-mcp
-    codex mcp add search-bench -- /path/to/Search/bench-mcp
+    claude mcp add roko-bench -- /path/to/Search/bench-mcp
+    codex mcp add roko-bench -- /path/to/Search/bench-mcp
 
 It speaks MCP over stdio, one JSON-RPC message per line, and nothing but the
 standard library. The agent calls open_session first, which starts this
-checkout's build/Search.app hidden, in a world of its own (SEARCH_PROBE,
+checkout's build/roko.app hidden, in a world of its own (SEARCH_PROBE,
 see fresh.sh): its own folder, settings and website data, nothing of the
 browser someone is using in reach. Every other tool takes that session.
 Nothing here reaches a Search this server didn't start: not the installed
@@ -54,11 +54,11 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-APP = str(ROOT / "build" / "Search.app")
+APP = str(ROOT / "build" / "roko.app")
 HOME = os.path.expanduser("~")
 SUPPORT = f"{HOME}/Library/Application Support"
-WEBKIT = f"{HOME}/Library/WebKit/com.officecommun.search"
-LEASES = f"{HOME}/Library/Caches/com.officecommun.search.bench-mcp"
+WEBKIT = f"{HOME}/Library/WebKit/com.growthstudio.roko.mac"
+LEASES = f"{HOME}/Library/Caches/com.growthstudio.roko.mac.bench-mcp"
 REAL = f"{SUPPORT}/Search"
 FIRST_SPACE = "00000000-0000-0000-0000-000000000001"
 PERSONAL = "00000000-0000-0000-0000-0000000000A1"
@@ -98,7 +98,7 @@ def folder(world):
 
 
 def suite(world):
-    return "com.officecommun.search.test" if world == "test" else f"com.officecommun.search.test.{world}"
+    return "com.growthstudio.roko.mac.test" if world == "test" else f"com.growthstudio.roko.mac.test.{world}"
 
 
 def socket_of(world):
@@ -849,7 +849,7 @@ def tool_wait_for(args):
 def tool_screenshot(args):
     s = session_of(args)
     handle = str(args.get("page", ""))
-    room = tempfile.mkdtemp(prefix="search-bench-mcp-")
+    room = tempfile.mkdtemp(prefix="roko-bench-mcp-")
     try:
         request = {"do": "shot", "id": s.tab(handle), "path": f"{room}/page.png"}
         if args.get("width"):
@@ -885,10 +885,6 @@ def tool_bench(args):
         raise Refusal("bad_request", 'request is a ./bench socket request, such as {"do": "tabs"}')
     if request["do"] == "quit":
         raise Refusal("bad_request", "close_session quits the world")
-    # The updater swaps the app it runs from: this checkout's build, which may
-    # be the browser someone uses every day. Nothing a session drives reaches it.
-    if request["do"] == "update":
-        raise Refusal("bad_request", "updates aren't driven from a session")
     request = dict(request)
     if request.get("id") in s.pages:
         request["id"] = s.pages[request["id"]]
@@ -1070,7 +1066,7 @@ TOOLS = [
         (
             "Any other ./bench socket request on this session's world, for testing Search itself: an object such "
             'as {"do": "split", "action": "state"}. A page handle in "id" is turned into its tab. '
-            "See ./bench help and skill/search-bench/SKILL.md."
+            "See ./bench help and skill/roko-bench/SKILL.md."
         ),
         {
             "type": "object",
@@ -1148,7 +1144,7 @@ def serve():
                 {
                     "protocolVersion": asked if asked in VERSIONS else VERSIONS[-1],
                     "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": "search-bench", "version": "0.1.0"},
+                    "serverInfo": {"name": "roko-bench", "version": "0.1.0"},
                     "instructions": INSTRUCTIONS,
                 },
             )

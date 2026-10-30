@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bounded live WebKit worker-port checks, using a disposable hidden Search.
 
-Build Search.app first (on Intel, copy build/intel/Search.app to build/Search.app)
+Build roko.app first (on Intel, copy build/intel/roko.app to build/roko.app)
 then run: python3 Tests/ExtensionWorkerRecovery/live.py
 
 Uses split_view's isolated SEARCH_PROBE lifecycle and the existing bench
@@ -34,7 +34,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-APP = ROOT / 'build' / 'Search.app'
+APP = ROOT / 'build' / 'roko.app'
 ATTRIBUTE = 'data-search-port-fixture'
 WORKER_READY_PREFIX = 'fixture-worker-ready:'
 TOTAL_TIMEOUT = 504
@@ -173,7 +173,7 @@ else:
 
 def lldb_command(debugger, app, world, support):
     support = Path(support)
-    executable = Path(app) / 'Contents/MacOS/Search'
+    executable = Path(app) / 'Contents/MacOS/roko'
     pid_path = support / 'lldb-owned-process.json'
     record = ("script import json, os, lldb; t=lldb.debugger.GetSelectedTarget(); p=t.GetProcess(); "
               "f=t.GetExecutable(); " +
@@ -185,7 +185,7 @@ def lldb_command(debugger, app, world, support):
                '--one-line', 'settings set target.disable-aslr false',
                '--one-line', 'settings set target.env-vars ' + json.dumps('SEARCH_PROBE=' + world)]
     # The copied Intel app may have its matching dSYM beside the original.
-    relative = Path('Search.app.dSYM/Contents/Resources/DWARF/Search')
+    relative = Path('roko.app.dSYM/Contents/Resources/DWARF/Search')
     candidates = [Path(app).parent / relative, Path(app).parent / 'intel' / relative]
     if platform.machine() == 'x86_64':
         candidates.reverse()
@@ -202,7 +202,7 @@ def lldb_owned_pid(text, app):
     try:
         data = json.loads(text)
         pid = data['pid']
-        if type(pid) is int and 1 < pid < 2 ** 31 and Path(data['executable']).resolve() == (Path(app) / 'Contents/MacOS/Search').resolve():
+        if type(pid) is int and 1 < pid < 2 ** 31 and Path(data['executable']).resolve() == (Path(app) / 'Contents/MacOS/roko').resolve():
             return pid
     except (ValueError, TypeError, KeyError):
         pass
@@ -268,11 +268,11 @@ def owned_report(text, *, pids, launched_at, modified_at, app):
         return None
     # Some .ips versions omit procPath; PID + process name + launch time still
     # identify our captured process. A supplied path must match our app exactly.
-    if path and Path(path).resolve() != (Path(app) / 'Contents/MacOS/Search').resolve():
+    if path and Path(path).resolve() != (Path(app) / 'Contents/MacOS/roko').resolve():
         # macOS may redact home-directory components even in local reports.
         # Keep PID + timestamp + process-name scoping when that exact app
         # suffix is intact; never accept a different explicit executable.
-        redacted = ('*' in path or '/USER/' in path) and path.endswith('/Search.app/Contents/MacOS/Search')
+        redacted = ('*' in path or '/USER/' in path) and path.endswith('/roko.app/Contents/MacOS/roko')
         if not redacted:
             return None
     return report if report is not None else {'pid': pid, 'procName': name, 'legacy': text[:24000]}
@@ -307,7 +307,7 @@ def search_addresses(report):
     summary = summarize_report(report)
     frames = summary.get('faultingThreadDetails', {}).get('frames', [])
     for index, image in enumerate(report.get('usedImages') or []):
-        if image.get('name') != 'Search' or not image.get('path', '').endswith('/Search.app/Contents/MacOS/Search'):
+        if image.get('name') != 'roko' or not image.get('path', '').endswith('/roko.app/Contents/MacOS/roko'):
             continue
         base = image.get('base')
         try:
@@ -335,7 +335,7 @@ def symbolicate_report(report, app):
         return
     image, base, addresses = selected
     build = Path(app).parent
-    relative = Path('Search.app.dSYM/Contents/Resources/DWARF/Search')
+    relative = Path('roko.app.dSYM/Contents/Resources/DWARF/Search')
     candidates = [build / relative, build / 'intel' / relative]
     if platform.machine() == 'x86_64':
         candidates.reverse()
@@ -398,22 +398,22 @@ def capture_os_reports(*, pids, launched_at, app, wait=20):
 
 
 def self_test():
-    app = Path('/tmp/search-live-self-test/Search.app')
-    report = {'pid': 123, 'procName': 'Search', 'procPath': str(app / 'Contents/MacOS/Search'),
+    app = Path('/tmp/search-live-self-test/roko.app')
+    report = {'pid': 123, 'procName': 'Search', 'procPath': str(app / 'Contents/MacOS/roko'),
               'exception': {'type': 'EXC_BAD_ACCESS'}, 'faultingThread': 0,
               'threads': [{'triggered': True, 'frames': [{'imageIndex': 0, 'symbol': 'testFrame'}]}],
-              'usedImages': [{'name': 'Search', 'path': str(app / 'Contents/MacOS/Search')}]}
+              'usedImages': [{'name': 'Search', 'path': str(app / 'Contents/MacOS/roko')}]}
     text = json.dumps({'app_name': 'Search'}) + '\n' + json.dumps(report)
     arguments = dict(pids={123}, launched_at=100.0, modified_at=101.0, app=app)
     assert owned_report(text, **arguments) == report
     assert owned_report(text, **dict(arguments, pids={456})) is None
     assert owned_report(text, **dict(arguments, pids=set())) is None
     assert owned_report(text, **dict(arguments, modified_at=99.9)) is None
-    assert owned_report(text, **dict(arguments, app=Path('/tmp/other/Search.app'))) is None
+    assert owned_report(text, **dict(arguments, app=Path('/tmp/other/roko.app'))) is None
     assert owned_report(json.dumps(dict(report, procName='Other')), **arguments) is None
-    redacted = dict(report, procPath='/Users/USER/*/Search.app/Contents/MacOS/Search')
+    redacted = dict(report, procPath='/Users/USER/*/roko.app/Contents/MacOS/roko')
     assert owned_report(json.dumps(redacted), **arguments) == redacted
-    legacy = f'Process: Search [123]\nPath: {app}/Contents/MacOS/Search\nException Type: EXC_CRASH'
+    legacy = f'Process: Search [123]\nPath: {app}/Contents/MacOS/roko\nException Type: EXC_CRASH'
     assert owned_report(legacy, **arguments)['pid'] == 123
     assert owned_report('not a report', **arguments) is None
     summary = summarize_report(report)
@@ -448,9 +448,9 @@ def self_test():
     assert '--one-line-on-crash' in command
     assert 'range(min(p.GetNumThreads(), 32))' in lldb_capture_command()
     assert 'thread backtrace --count 48' in lldb_capture_command()
-    assert lldb_owned_pid(json.dumps({'pid': 123, 'executable': str(app / 'Contents/MacOS/Search')}), app) == 123
+    assert lldb_owned_pid(json.dumps({'pid': 123, 'executable': str(app / 'Contents/MacOS/roko')}), app) == 123
     assert lldb_owned_pid(json.dumps({'pid': 123, 'executable': '/tmp/unrelated/Search'}), app) is None
-    assert lldb_owned_pid(json.dumps({'pid': True, 'executable': str(app / 'Contents/MacOS/Search')}), app) is None
+    assert lldb_owned_pid(json.dumps({'pid': True, 'executable': str(app / 'Contents/MacOS/roko')}), app) is None
     assert lldb_owned_pid('incomplete', app) is None
     assert lldb_launch_error('error: Operation not permitted').startswith('BLOCKED:')
     assert not lldb_launch_error('target stopped').startswith('BLOCKED:')
@@ -567,7 +567,7 @@ class Live:
                 socket.unlink()
             self.output_paths = {stream: support / ('direct-' + stream + '.log') for stream in ('stdout', 'stderr')}
             with self.output_paths['stdout'].open('wb') as stdout, self.output_paths['stderr'].open('wb') as stderr:
-                self.process = subprocess.Popen([str(APP / 'Contents/MacOS/Search')],
+                self.process = subprocess.Popen([str(APP / 'Contents/MacOS/roko')],
                                                 env=direct_environment(self.sv.W), cwd=ROOT,
                                                 stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr)
             self.owned_pids.add(self.process.pid)
@@ -607,7 +607,7 @@ class Live:
         self.lldb_pid_path = support / 'lldb-owned-process.json'
         self.lldb_paths = {name: support / ('lldb-' + name + '.log') for name in ('transcript', 'stdout', 'stderr')}
         command = lldb_command(debugger, APP, self.sv.W, support)
-        print('LLDB_LAUNCH', json.dumps({'debugger': str(debugger), 'executable': str(APP / 'Contents/MacOS/Search'),
+        print('LLDB_LAUNCH', json.dumps({'debugger': str(debugger), 'executable': str(APP / 'Contents/MacOS/roko'),
               'probe': self.sv.W, 'attach': False, 'maxThreads': LLDB_MAX_THREADS, 'maxFramesPerThread': LLDB_MAX_FRAMES}), flush=True)
         with self.lldb_paths['transcript'].open('wb') as transcript:
             self.debugger = subprocess.Popen(command, cwd=ROOT, env=direct_environment(self.sv.W),
@@ -1118,8 +1118,8 @@ def main(argv=None):
     if tuple(int(part) for part in platform.mac_ver()[0].split('.')[:2]) < (15, 4):
         print('NOT RUN: WKWebExtension requires macOS 15.4 or newer.', flush=True)
         return 2
-    if not (APP / 'Contents/MacOS/Search').is_file():
-        print(f'NOT RUN: built app missing at {APP}; build first (copy build/intel/Search.app here on Intel).', flush=True)
+    if not (APP / 'Contents/MacOS/roko').is_file():
+        print(f'NOT RUN: built app missing at {APP}; build first (copy build/intel/roko.app here on Intel).', flush=True)
         return 2
     signal.signal(signal.SIGALRM, expired)
     signal.alarm(LLDB_WORK_TIMEOUT if options.lldb_launch else WORK_TIMEOUT)

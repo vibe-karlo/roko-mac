@@ -97,7 +97,7 @@ def main():
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
-    source = (ROOT / "Sources/Search/Float.swift").read_text()
+    source = (ROOT / "Sources/Roko/Float.swift").read_text()
     start = source.index('static let on = """') + len('static let on = """')
     isolate = source[start:source.index('"""', start)].strip().replace("\\\\", "\\")
     start = source.index('static let off = """') + len('static let off = """')

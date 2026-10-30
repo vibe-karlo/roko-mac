@@ -4,7 +4,7 @@ scripts that wait on a top-level await, getPlatformInfo applied to nothing,
 and a port's listener reading what was kept on the port.
 
 Build first (`./build.sh`), then `python3 Tests/extension_module_await.py`.
-It runs a copy of build/Search.app under a bundle id of its own, in a world
+It runs a copy of build/roko.app under a bundle id of its own, in a world
 of its own with split_view.py's harness, started hidden; the copy, its
 WebKit folders and the world are removed afterwards.
 
@@ -44,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import split_view as sv  # noqa: E402
 
 sv.use("hub-sp-modules")
-BUNDLE = "com.officecommun.search.hubspmodules"
+BUNDLE = "com.growthstudio.roko.mac.hubspmodules"
 work = Path(tempfile.mkdtemp(prefix="search-modules-"))
 
 FILES = {
@@ -123,13 +123,13 @@ window.__r = Option_.word;
 
 
 def probe_copy():
-    """build/Search.app (or the app the harness was pointed at) under a
+    """build/roko.app (or the app the harness was pointed at) under a
     bundle id of its own, signed ad hoc."""
-    app = work / "Search.app"
+    app = work / "roko.app"
     shutil.copytree(sv.APP, app, symlinks=True)
     subprocess.run(["/usr/libexec/PlistBuddy", "-c", f"Set :CFBundleIdentifier {BUNDLE}", str(app / "Contents/Info.plist")], check=True)
     (app / "Contents/embedded.provisionprofile").unlink(missing_ok=True)
-    subprocess.run(["codesign", "-f", "-s", "-", "--entitlements", str(Path(sv.ROOT, "Search.entitlements")), "--deep", str(app)],
+    subprocess.run(["codesign", "-f", "-s", "-", "--entitlements", str(Path(sv.ROOT, "roko.entitlements")), "--deep", str(app)],
                    check=True, capture_output=True)
     return str(app)
 

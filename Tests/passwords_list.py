@@ -99,7 +99,7 @@ def main():
         sv.cmd({"do": "ui", "settings": True}); time.sleep(0.6)
         sv.cmd({"do": "ui", "lead": "passwords"}); time.sleep(0.8)
         t.ok("Settings › Passwords › Open…: the Settings tab is now the Passwords page",
-             "search://passwords" in internal(), internal())
+             "roko://passwords" in internal(), internal())
         r = listed()
         t.ok("…and lists all three accounts, without being asked again", r.get("count") == 3, r)
 
@@ -114,8 +114,8 @@ def main():
         # read as the page is drawn.
         sv.cmd({"do": "ui", "lead": "settings"}); time.sleep(0.6)
         keep("pwl-typed.example", "typed@example.org")
-        sv.cmd({"do": "ui", "go": "search://passwords"}); time.sleep(0.8)
-        t.ok("search://passwords typed on the Settings tab: Passwords", "search://passwords" in internal(), internal())
+        sv.cmd({"do": "ui", "go": "roko://passwords"}); time.sleep(0.8)
+        t.ok("roko://passwords typed on the Settings tab: Passwords", "roko://passwords" in internal(), internal())
         r = listed()
         t.ok("…lists the one kept meanwhile too: five", r.get("count") == 5, r)
 

@@ -2,7 +2,7 @@
 """uBlock Origin Lite's rules don't blank pages (#709) — in a hidden probe.
 
 Build first (`./build.sh`), then `python3 Tests/extension_ubol.py`. Same
-harness as extension_rule_redirect.py: a copy of build/Search.app under a
+harness as extension_rule_redirect.py: a copy of build/roko.app under a
 bundle id of its own, in a world of its own, started hidden; the copy, its
 WebKit folders and the world are removed afterwards.
 
@@ -45,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import split_view as sv  # noqa: E402
 
 sv.use("sec-ubol")
-BUNDLE = "com.officecommun.search.ubol"
+BUNDLE = "com.growthstudio.roko.mac.ubol"
 UBOL = "ddkjiahejlhfcafbddmgiahcphecmpfh"
 work = Path(tempfile.mkdtemp(prefix="search-ubol-"))
 PORT = sv.srv.server_port
@@ -122,11 +122,11 @@ sv.srv.RequestHandlerClass = Pages
 
 
 def probe_copy():
-    app = work / "Search.app"
-    shutil.copytree(Path(sv.ROOT, "build", "Search.app"), app, symlinks=True)
+    app = work / "roko.app"
+    shutil.copytree(Path(sv.ROOT, "build", "roko.app"), app, symlinks=True)
     subprocess.run(["/usr/libexec/PlistBuddy", "-c", f"Set :CFBundleIdentifier {BUNDLE}", str(app / "Contents/Info.plist")], check=True)
     (app / "Contents/embedded.provisionprofile").unlink(missing_ok=True)
-    subprocess.run(["codesign", "-f", "-s", "-", "--entitlements", str(Path(sv.ROOT, "Search.entitlements")), "--deep", str(app)],
+    subprocess.run(["codesign", "-f", "-s", "-", "--entitlements", str(Path(sv.ROOT, "roko.entitlements")), "--deep", str(app)],
                    check=True, capture_output=True)
     return str(app)
 

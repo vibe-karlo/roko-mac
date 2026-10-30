@@ -21,7 +21,7 @@ import split_view as sv  # noqa: E402
 
 sv.W = "dark-pages"
 sv.SUPPORT = f"{sv.HOME}/Library/Application Support/Search ({sv.W})"
-sv.SUITE = f"com.officecommun.search.test.{sv.W}"
+sv.SUITE = f"com.growthstudio.roko.mac.test.{sv.W}"
 sv.SOCK = f"{sv.SUPPORT}/bench.sock"
 SHOTS = sys.argv[1] if len(sys.argv) > 1 else None
 

@@ -18,10 +18,10 @@ cd "$(dirname "$0")"
 WORLD=$(printf '%s' "${SEARCH_PROBE:-test}" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-')
 case "$WORLD" in ""|1) WORLD=test ;; esac
 if [ "$WORLD" = test ]; then
-  SUITE=com.officecommun.search.test; HASH=0
+  SUITE=com.growthstudio.roko.mac.test; HASH=0
 else
   # Store.probeStore: FNV-1a of the name in the store's identifier.
-  SUITE="com.officecommun.search.test.$WORLD"; HASH=2166136261
+  SUITE="com.growthstudio.roko.mac.test.$WORLD"; HASH=2166136261
   for ((i = 0; i < ${#WORLD}; i++)); do
     HASH=$(( ((HASH ^ $(printf '%d' "'${WORLD:i:1}")) * 16777619) & 0xFFFFFFFF ))
   done
@@ -32,11 +32,11 @@ if [ "${1:-}" != "again" ]; then
   rm -rf "$HOME/Library/Application Support/Search ($WORLD)"
   defaults delete "$SUITE" 2>/dev/null || true
   # Store.probeStore(1), the fixed identifier of the world's website data.
-  rm -rf "$HOME/Library/WebKit/com.officecommun.search/WebsiteDataStore/$STORE"
+  rm -rf "$HOME/Library/WebKit/com.growthstudio.roko.mac/WebsiteDataStore/$STORE"
   echo "world \"$WORLD\" wiped"
 fi
 
-[ -d "build/Search.app" ] || ./build.sh release
+[ -d "build/roko.app" ] || ./build.sh release
 
 # A world the bench is going to drive opens hidden. A test run that comes to
 # the front trips the probe's own guard, which hides the app and then refuses
@@ -47,4 +47,4 @@ HIDDEN=""
 if [ "$(defaults read "$SUITE" bench 2>/dev/null || true)" = 1 ]; then
   HIDDEN="-g -j"
 fi
-open -n $HIDDEN --env SEARCH_PROBE="$WORLD" "build/Search.app"
+open -n $HIDDEN --env SEARCH_PROBE="$WORLD" "build/roko.app"

@@ -2,22 +2,22 @@
 import PackageDescription
 
 let package = Package(
-    name: "Search",
-    platforms: [.macOS(.v14)],
+    name: "Roko",
+    platforms: [.macOS("27.0")],
     targets: [
         .executableTarget(
-            name: "Search",
-            path: "Sources/Search",
+            name: "Roko",
+            path: "Sources/Roko",
             // Same reasoning as the canvas app next door: the whole interface is
             // main-thread by nature, and Swift 6's strict isolation buys nothing
-            // here but ceremony.
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            // here but ceremony. /regex/ literals, as the iPhone app's answers use.
+            swiftSettings: [.swiftLanguageMode(.v5), .enableUpcomingFeature("BareSlashRegexLiterals")]
         ),
         .testTarget(
-            name: "SearchTests",
-            dependencies: ["Search"],
-            path: "Tests/SearchTests",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            name: "RokoTests",
+            dependencies: ["Roko"],
+            path: "Tests/RokoTests",
+            swiftSettings: [.swiftLanguageMode(.v5), .enableUpcomingFeature("BareSlashRegexLiterals")]
         )
     ]
 )

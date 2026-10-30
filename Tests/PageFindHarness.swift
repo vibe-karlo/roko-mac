@@ -4,7 +4,7 @@ import Foundation
 import WebKit
 
 /// Search's own world, as the app defines it (Web.swift).
-enum Web { @MainActor static let world = WKContentWorld.world(name: "Search") }
+enum Web { @MainActor static let world = WKContentWorld.world(name: "roko") }
 
 @MainActor
 private final class PageFindHarness: NSObject, NSApplicationDelegate {

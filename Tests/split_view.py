@@ -26,7 +26,7 @@ from pathlib import Path
 
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 ROOT = Path(__file__).resolve().parents[1]
-APP = str(ROOT / "build" / "Search.app")
+APP = str(ROOT / "build" / "roko.app")
 HOME = os.path.expanduser("~")
 def use(name):
     """This checkout's own world for a suite: the name, then a tag made from
@@ -37,7 +37,7 @@ def use(name):
     global W, SUPPORT, SUITE, SOCK
     W = f"{name}-{hashlib.sha1(str(ROOT).encode()).hexdigest()[:8]}"
     SUPPORT = f"{HOME}/Library/Application Support/Search ({W})"
-    SUITE = f"com.officecommun.search.test.{W}"
+    SUITE = f"com.growthstudio.roko.mac.test.{W}"
     SOCK = f"{SUPPORT}/bench.sock"
 use("split-tests")
 class H(BaseHTTPRequestHandler):
@@ -62,7 +62,7 @@ started = set()
 def running(): return set(subprocess.run(["pgrep", "-f", APP + "/Contents/MacOS"], capture_output=True, text=True).stdout.split())
 def holding(): return set(subprocess.run(["lsof", "-t", "--", SOCK], capture_output=True, text=True).stdout.split()) if os.path.exists(SOCK) else set()
 def pids(): return sorted((started & running()) | (holding() & running()))
-WEBKIT = f"{HOME}/Library/WebKit/com.officecommun.search"
+WEBKIT = f"{HOME}/Library/WebKit/com.growthstudio.roko.mac"
 def stores():
     """The WebKit stores this world's runs made, where WebKit keeps them and
     named as the app names them (Store.probeStore, Spaces.store): its

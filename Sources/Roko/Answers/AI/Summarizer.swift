@@ -1,0 +1,948 @@
+import FoundationModels
+import NaturalLanguage
+import AppKit
+import WebKit
+
+/// The shape every AI answer takes, so the app can lay it out as a page:
+/// a lead line, then a few sections each tagged with a topic the app draws as an icon.
+private func answerShape(sections: String = "three to five", picks: Bool = false, keyPoints: Bool = false) -> String {
+    let opening = keyPoints ? "\n> - <one of the three things most worth knowing beyond the gist>" : ""
+    let choice = picks ? "\n=> <option> | <its price or deciding number> | <who it suits, a few words>" : ""
+    let openingRule = keyPoints ? " Then three \"> - \" lines, the three things most worth knowing beyond the gist, each at most 15 words." : ""
+    let choiceRule = picks ? """
+         If the question asks which to choose or what is best, then two to four "=> " lines, best \
+        first: the option's name, its price or deciding number as short as "$299" or "40 hours" (nothing \
+        at all if the sources give none), and who it suits, separated by " | ". Otherwise no "=> " lines.
+        """ : ""
+    return """
+    Format, in Markdown (angle brackets mark what you write):
+
+    @ <recipe, howto, compare, article or general>
+    %% <a number that matters most, as short as "25 min" or "$600"> | <what it is, one or two words>
+    > <the gist, one or two sentences>\(opening)\(choice)
+    ## [<topic>] <heading, two to five words>
+    - **<key term>:** <detail>
+
+    Rules: the first line names what this is: recipe for cooking and baking, howto for \
+    instructions and tutorials, compare for reviews and choosing, article for news and essays, \
+    general for anything else. Then "%% " lines only for numbers someone came for: a recipe's time, \
+    servings and difficulty; a price; a distance. At most three. An article has none, and \
+    neither has an explanation unless a number is the answer: never a year, a date, an age or \
+    a count that only sets the scene, and when in doubt, none. One "> " line with the gist.\(openingRule)\(choiceRule) Then \(sections) "## " \
+    sections with headings of two to five words, written for this answer. The word in brackets \
+    only chooses the section's icon: pick the closest from [\(AnswerTopic.vocabulary)], or leave \
+    the brackets empty if none fits, and use each at most once.
+
+    Under each heading, write in the form that fits what it holds, not always bullets:
+    - "- " lines for points, each one sentence of at most 20 words, or one or two short sentences.
+    - "[] <thing> | <amount>" lines for what to have: a recipe's ingredients, a how-to's tools.
+    - "1. ", "2. " lines for steps in order: one sentence each, at most 20 words, starting \
+    with what to do. Split a long step into two rather than writing two sentences.
+    - "<> | <first option> | <second option>" and then "<> <point> | <value> | <value>" lines \
+    for two options side by side, values as short as "98%" or "yes".
+    - "@@ <name> | <role> | <their point, one sentence>" lines for who says what in an article.
+    - one "!! <sentence>" line, anywhere, for the one thing to watch out for, if there is one.
+    Say each fact once, in your own words: never follow a sentence with another that repeats \
+    it closer to the source's wording, and put the source's words nowhere else.
+    A recipe has an ingredients section and a method section; a how-to a "you need" section if \
+    anything is needed, then its steps. No emoji. No preamble, no sign-off.
+    """
+}
+
+/// The instructions stay in English whatever the summary is written in:
+/// Apple's on-device model refused every request whose instructions were in Croatian.
+private func summaryGuidance(_ language: WritingLanguage?) -> String {
+    """
+    You summarize web pages for a phone browser. \(language?.instruction ?? "Write in the page's own language.") \
+    Only facts from the page, and each fact once: never repeat a point. No preamble, no sign-off.
+    """
+}
+
+/// Says why a summary is in English when it was to be in another language.
+private func englishNote(_ language: WritingLanguage) -> String {
+    "In English: Apple's models write poor \(language.english)."
+}
+
+@MainActor
+@Observable
+final class SummaryModel: Identifiable {
+    enum Phase: Equatable {
+        case reading, writing, done, failed(String)
+
+        var isFailure: Bool {
+            if case .failed = self { return true }
+            return false
+        }
+    }
+
+    let title: String
+    let host: String
+    var snapshot: NSImage?
+    /// Growing back into the page: the status bar takes the site's colour again.
+    var isClosing = false
+    private(set) var text = ""
+    private(set) var phase: Phase = .reading
+    private(set) var engine = ""
+    private(set) var note: String?
+    /// The page's length in words, once it's read.
+    private(set) var pageWords: Int?
+
+    /// "6 min read → 40 s": the time the summary saved, for a page worth it.
+    var readingTime: String? {
+        guard phase == .done, let pageWords else { return nil }
+        let pageMinutes = Int((Double(pageWords) / 230).rounded())
+        guard pageMinutes >= 2 else { return nil }
+        let seconds = max(10, Int((Double(SavedStats.words(in: text)) / 230 * 60 / 10).rounded()) * 10)
+        return "\(pageMinutes) min read → \(seconds < 60 ? "\(seconds) s" : "\(seconds / 60) min")"
+    }
+
+    init(title: String, host: String, snapshot: NSImage?) {
+        self.title = title
+        self.host = host
+        self.snapshot = snapshot
+    }
+
+    /// Reading the page or waiting for the first words: the light is up.
+    var isWorking: Bool {
+        phase == .reading || phase == .writing && text.isEmpty
+    }
+
+    /// For the light: lower while the page is read, higher while the first words come.
+    var progress: Double {
+        phase == .reading ? 0.35 : 0.8
+    }
+
+    @ObservationIgnored private var task: Task<Void, Never>?
+
+    /// The page's address: a summary already written for it is shown at once.
+    @ObservationIgnored private var url: URL?
+
+    func start(webView: WKWebView, url: URL?) {
+        self.url = url
+        if let url, let cached = SummaryCache.entry(for: url) {
+            text = cached.text
+            engine = cached.engine
+            note = cached.note
+            pageWords = cached.pageWords
+            phase = .done
+            return
+        }
+        task = Task { await run(webView: webView) }
+    }
+
+    /// Stops reading and writing: the summary was closed, and nobody will read the rest.
+    func cancel() {
+        task?.cancel()
+    }
+
+    private func run(webView: WKWebView) async {
+        let page: ReadablePage
+        do {
+            page = try await PageReader.read(webView)
+            HitchWatch.note("page read")
+        } catch {
+            if !Task.isCancelled { phase = .failed(error.localizedDescription) }
+            return
+        }
+        await write(page)
+    }
+
+    /// A page already read, summarized: for the tests, which have no web view.
+    func summarize(_ page: ReadablePage) async {
+        await write(page)
+    }
+
+    private func write(_ page: ReadablePage) async {
+        phase = .writing
+        pageWords = SavedStats.words(in: page.text)
+
+        // Apple's models write some languages well and others badly (Croatian
+        // with Serbian words and broken endings), and no prompt fixes that. So
+        // a summary in a language they write badly goes to Claude first, and
+        // when Apple's models write it anyway (no key, Claude off or failing),
+        // it's in English. Everything else stays on Apple's models, free and
+        // private, with Claude as the fallback.
+        // Off the main thread: telling the language took over 100 ms there, in
+        // the middle of the card's move into place.
+        let (pageText, host, declared) = (page.text, host, page.declaredLanguage)
+        let language = await Task.detached(priority: .userInitiated) {
+            AnswerLanguage.target(for: pageText, host: host, declared: declared)
+        }.value
+        let appleWritesIt = language?.appleWritesWell ?? true
+        HitchWatch.note("language")
+        var engines: [Engine] = [.appleCloud, .onDevice]
+        if ClaudeClient.configured != nil { appleWritesIt ? engines.append(.claude) : engines.insert(.claude, at: 0) }
+
+        var lastError: Error = ClaudeError(
+            message: "Summaries need Apple Intelligence on this iPhone, or a Claude API key in Settings.")
+        for engine in engines {
+            do {
+                guard try await write(page, with: engine, in: language, appleWritesIt: appleWritesIt) else { continue }
+                phase = .done
+                SavedStats.summary(pageWords: SavedStats.words(in: page.text), summaryWords: SavedStats.words(in: text))
+                if let url, !text.isEmpty {
+                    SummaryCache.store(.init(text: text, engine: self.engine, note: note, at: .now, pageWords: pageWords), for: url)
+                }
+                return
+            } catch is CancellationError {
+                return
+            } catch {
+                // A cancelled request fails as URLError.cancelled: closed, not failed.
+                if Task.isCancelled { return }
+                // Quota reached, offline, refused, or out of its depth: try the next engine.
+                // What was written stays on screen until the next one's first words
+                // replace it, rather than the page going blank and starting over.
+                AITrace.log("summary: \(self.engine) failed: \(error)")
+                lastError = error
+                replacing = !text.isEmpty
+                note = nil
+            }
+        }
+        phase = .failed(AppleModels.explain(lastError, doing: "summarize this page") ?? lastError.localizedDescription)
+    }
+
+    private enum Engine { case appleCloud, onDevice, claude }
+
+    /// Writes the summary with one engine; false when that engine isn't available here.
+    private func write(_ page: ReadablePage, with engine: Engine, in language: WritingLanguage?,
+                       appleWritesIt: Bool) async throws -> Bool {
+        let longNote = "Long page: this covers the first part."
+        // Apple's models write English rather than a language they write badly, and say so.
+        let appleLanguage = appleWritesIt ? language : .english
+        let languageNote = appleWritesIt ? nil : language.map(englishNote)
+        switch engine {
+        case .appleCloud:
+            guard let cloud = AppleModels.cloudIfAvailable else { return false }
+            self.engine = "Apple Intelligence"
+            let budget = await AppleModels.characterBudget(of: cloud)
+            note = Self.note(page.text.count > budget ? longNote : nil, languageNote)
+            let prompt = "Title: \(page.title)\nSite: \(page.site)\n\n\(page.text.prefix(budget))"
+            for try await snapshot in AppleModels.streamAnswer(cloud, instructions: summaryGuidance(appleLanguage),
+                                                               prompt: prompt, titled: false) {
+                text = snapshot
+            }
+
+        case .onDevice:
+            guard OnDeviceSummarizer.isAvailable else { return false }
+            self.engine = "On-device"
+            let (stream, truncated) = OnDeviceSummarizer.summarize(page, in: appleLanguage)
+            note = Self.note(truncated ? longNote : nil, languageNote)
+            let started = CFAbsoluteTimeGetCurrent()
+            for try await snapshot in stream {
+                if text.isEmpty, !snapshot.isEmpty, LaunchClock.isEnabled {
+                    print(String(format: "SUMMARY first words in %.1fs (%d characters on the page)", CFAbsoluteTimeGetCurrent() - started, page.text.count))
+                }
+                text = snapshot
+            }
+            if LaunchClock.isEnabled { print(String(format: "SUMMARY finished in %.1fs", CFAbsoluteTimeGetCurrent() - started)) }
+
+        case .claude:
+            guard let client = ClaudeClient.configured else { return false }
+            self.engine = "Claude"
+            let prompt = "Title: \(page.title)\nSite: \(page.site)\n\n\(page.text)"
+            // Haiku: a summary needs no more. Sonnet only if Haiku declines,
+            // since Sonnet has a fallback of its own for refusals.
+            do {
+                try await stream(client, prompt: prompt, model: .haiku, language: language)
+            } catch let error as ClaudeError where error.isRefusal {
+                text = ""
+                try await stream(client, prompt: prompt, model: .sonnet, language: language)
+            }
+        }
+        // Cancelled, a stream just ends: closed, not done.
+        try Task.checkCancellation()
+        return true
+    }
+
+    /// The footer's notes, together; nil when there are none.
+    private static func note(_ parts: String?...) -> String? {
+        let text = parts.compactMap { $0 }.joined(separator: " ")
+        return text.isEmpty ? nil : text
+    }
+
+    private func stream(_ client: ClaudeClient, prompt: String, model: ClaudeClient.Model,
+                        language: WritingLanguage?) async throws {
+        let instructions = summaryGuidance(language) + "\n\n" + answerShape(sections: "two to four", keyPoints: true)
+        for try await event in client.stream(system: instructions, prompt: prompt, model: model,
+                                             effort: "low", maxTokens: 4_096) {
+            if case .text(let chunk) = event {
+                if replacing {
+                    text = chunk
+                    replacing = false
+                } else {
+                    text += chunk
+                }
+            }
+        }
+    }
+
+    /// The last engine failed partway: its words stay up until these replace them.
+    @ObservationIgnored private var replacing = false
+}
+
+/// Apple's on-device model: free, private and instant, with a small context
+/// window. Long pages are condensed chunk by chunk, then summarized as a whole.
+enum OnDeviceSummarizer {
+    /// What the on-device model reads at a time. The summary starts from the
+    /// page's opening, one pass, so its first words come quickly; then, while
+    /// it's being read, each later part adds a section or two below. (Reading
+    /// every part before writing a word took half a minute on a long feature.)
+    private static let partLength = 9_000
+    /// Parts read in all: about the first 27,000 characters.
+    private static let maxParts = 3
+
+    static var isAvailable: Bool {
+        AppleModels.onDeviceAvailable
+    }
+
+    /// Streams the growing summary text; `truncated` is true when the page was too long to read in full.
+    /// `language`: what to write in; nil follows the page.
+    static func summarize(_ page: ReadablePage, in language: WritingLanguage?) -> (AsyncThrowingStream<String, Error>, truncated: Bool) {
+        let parts = split(page.text)
+        let truncated = parts.count > maxParts
+        let stream = AsyncThrowingStream<String, Error> { continuation in
+            let task = Task {
+                do {
+                    var summary = ""
+                    let prompt = "Title: \(page.title)\nSite: \(page.site)\n\n\(parts.first ?? "")"
+                    for try await markdown in AppleModels.streamAnswer(AppleModels.summarizing,
+                                                                       instructions: summaryGuidance(language),
+                                                                       prompt: prompt, titled: false) {
+                        summary = markdown
+                        continuation.yield(summary)
+                    }
+                    // The rest, a part at a time, added below as it's read.
+                    for part in parts.dropFirst().prefix(maxParts - 1) {
+                        try Task.checkCancellation()
+                        let base = summary
+                        let further = "Already in the summary:\n\(base)\n\nA later part of the same page:\n\(part)"
+                        for try await more in AppleModels.streamAnswer(AppleModels.summarizing, shape: FurtherSections.self,
+                                                                       instructions: summaryGuidance(language) + " Add only what the summary doesn't already say.",
+                                                                       prompt: further, titled: false) where !more.isEmpty {
+                            summary = base + "\n\n" + more
+                            continuation.yield(summary)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        return (stream, truncated)
+    }
+
+    /// The text in parts of about `partLength`, each ending at a paragraph where one is near.
+    private static func split(_ text: String) -> [String] {
+        var parts: [String] = []
+        var rest = Substring(text)
+        while !rest.isEmpty {
+            var cut = rest.prefix(partLength)
+            if cut.count == partLength, let end = cut.range(of: "\n\n", options: .backwards),
+               cut.distance(from: cut.startIndex, to: end.lowerBound) > partLength / 2 {
+                cut = cut[..<end.lowerBound]
+            }
+            parts.append(String(cut))
+            rest = rest.dropFirst(cut.count).drop { $0.isWhitespace }
+        }
+        return parts
+    }
+}
+
+/// Summaries already written, by page and language: the same article again
+/// opens on its summary at once and costs nothing. Kept for a day (news
+/// pages change), a hundred at most, in Caches.
+@MainActor
+enum SummaryCache {
+    struct Entry: Codable {
+        let text: String
+        let engine: String
+        let note: String?
+        let at: Date
+        /// The page's length in words, for "6 min read → 40 s" (absent in older entries).
+        var pageWords: Int? = nil
+    }
+
+    private static let lifetime: TimeInterval = 24 * 3600
+    private static var file: URL { URL.cachesDirectory.appending(path: "summaries.json") }
+    private static var entries: [String: Entry] = {
+        guard let data = try? Data(contentsOf: file),
+              let saved = try? JSONDecoder().decode([String: Entry].self, from: data) else { return [:] }
+        return saved.filter { Date.now.timeIntervalSince($0.value.at) < lifetime }
+    }()
+
+    /// The page without its fragment, and the language summaries are written in.
+    static func key(for url: URL) -> String {
+        var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        parts?.fragment = nil
+        return (parts?.string ?? url.absoluteString) + "|" + AnswerLanguage.signature
+    }
+
+    static func entry(for url: URL) -> Entry? {
+        guard let entry = entries[key(for: url)], Date.now.timeIntervalSince(entry.at) < lifetime else { return nil }
+        return entry
+    }
+
+    static func store(_ entry: Entry, for url: URL) {
+        entries[key(for: url)] = entry
+        if entries.count > 100 {
+            for old in entries.sorted(by: { $0.value.at < $1.value.at }).prefix(entries.count - 100) { entries[old.key] = nil }
+        }
+        let snapshot = entries
+        let file = file
+        Task.detached(priority: .utility) {
+            if let data = try? JSONEncoder().encode(snapshot) { try? data.write(to: file, options: .atomic) }
+        }
+    }
+}
+
+@MainActor
+@Observable
+final class BrowseForMeModel: Identifiable {
+    enum Phase: Equatable {
+        case searching(String), reading(Int), writing, done, failed(String)
+
+        var isFailure: Bool {
+            if case .failed = self { return true }
+            return false
+        }
+    }
+
+    /// One page being read, for the live list while you wait.
+    struct Step: Identifiable, Equatable {
+        enum State { case reading, read, skipped }
+        let url: URL
+        var state: State
+        var id: URL { url }
+    }
+
+    let query: String
+    /// Quick fact, ordinary question, or one worth real research.
+    let depth: ResearchDepth
+    private(set) var text = ""
+    private(set) var sources: [AnswerSource] = []
+    private(set) var steps: [Step] = []
+    /// Pictures from the sources, shown above the answer.
+    private(set) var images: [URL] = []
+    /// YouTube videos on the question, shown under the answer.
+    private(set) var videos: [YouTube.Video] = []
+    private(set) var phase: Phase = .searching("")
+    private(set) var engine = ""
+    /// Earlier questions and answers on the same page, for a follow-up.
+    let context: [(question: String, answer: String)]
+
+    init(query: String, context: [(question: String, answer: String)] = []) {
+        self.query = query
+        self.context = context
+        depth = ResearchDepth.of(query)
+    }
+
+    /// Still finding: no answer text yet.
+    var isWorking: Bool {
+        switch phase {
+        case .searching, .reading: true
+        case .writing: text.isEmpty
+        case .done, .failed: false
+        }
+    }
+
+    /// How far along the finding is, 0 to 1, for the light that rises while you wait.
+    var progress: Double {
+        switch phase {
+        case .searching:
+            // Claude's own searches turn up pages before any reading phase.
+            0.12 + 0.5 * min(1, Double(steps.count) / 8)
+        case .reading(let count):
+            0.3 + 0.5 * Double(steps.filter { $0.state != .reading }.count) / Double(max(count, 1))
+        case .writing: text.isEmpty ? 0.9 : 1
+        case .done, .failed: 1
+        }
+    }
+
+    @ObservationIgnored private var task: Task<Void, Never>?
+
+    func start() {
+        task = Task { await run() }
+    }
+
+    /// Asks again after a failure, from the search on.
+    func retry() {
+        guard phase.isFailure else { return }
+        appleError = nil
+        text = ""
+        sources = []
+        steps = []
+        images = []
+        videos = []
+        phase = .searching(query)
+        start()
+    }
+
+    /// Stops searching and writing: the answer was closed or replaced.
+    func cancel() {
+        task?.cancel()
+        videoSearch?.cancel()
+        stopLookingForPictures()
+    }
+
+    /// The answer without its source marks, for sharing and for follow-ups.
+    var plainAnswer: String {
+        answer.replacingOccurrences(of: #"\[\[[\d,]+\]\]"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?m)^@ \w+\n?"#, with: "", options: .regularExpression)
+    }
+
+    /// The answer without its follow-up lines (nor the lone "?" a follow-up
+    /// line starts as while it streams in).
+    var answer: String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { line in
+                let line = line.trimmingCharacters(in: .whitespaces)
+                return line != "?" && !line.hasPrefix(Self.followUpMark)
+            }
+            .joined(separator: "\n")
+    }
+
+    /// Questions to ask next, once the answer is complete. Written by the model
+    /// as lines starting with "?? ", only when they'd genuinely help.
+    var followUps: [String] {
+        guard phase == .done else { return [] }
+        return text.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix(Self.followUpMark) }
+            .map { String($0.dropFirst(Self.followUpMark.count)).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .prefix(3)
+            .map { $0 }
+    }
+
+    static let followUpMark = "??"
+
+    private static func claudeInstructions(_ depth: ResearchDepth, language: WritingLanguage?) -> String {
+        let task = switch depth {
+        case .quick: """
+            Answer briefly. One or two searches and two or three good sources are enough. First \
+            line: "# " and a specific title. Then one "> " line with the direct answer in one to \
+            three sentences. Then at most three "- " lines of supporting detail, only if they \
+            help. No "## " sections. No emoji. No preamble, no sign-off.
+            """
+        case .standard: """
+            One to three searches and four to six trustworthy sources. Write a compact answer \
+            page. First line: "# " and a specific title. Lead with what the person most likely \
+            wants to know.
+            """ + answerShape(picks: true)
+        case .deep: """
+            Research this properly: search from several angles and read at least six \
+            trustworthy sources. Give specifics: names, numbers, prices, dates and trade-offs. \
+            Where sources disagree, say so. First line: "# " and a specific title. Lead with \
+            what the person most likely wants to know.
+            """ + answerShape(sections: "five to seven", picks: true)
+        }
+        // Haiku answered "why is the sky blue" from memory, with no search and
+        // so no sources; the feature promises an answer read from the web.
+        // It also copied sentences from English and Serbian sources straight
+        // into Croatian answers, so the language rule covers every sentence.
+        let writeIn = language.map { "in \($0.standard ?? $0.english)" } ?? "in the language of the question"
+        return """
+        You are the "Browse for Me" feature of a phone browser. Always search the web before \
+        answering, even when you already know the answer: the person wants current facts with \
+        sources they can open. Write every sentence \(writeIn), including facts from sources in \
+        other languages: put them in your own words, never copy a source's sentences. \
+        Don't list the sources (the app shows them). Prefer the maker's own site, \
+        established reviewers and major publications. Skip pages that only rank products to \
+        earn affiliate commissions, especially on sites whose name has nothing to do with the \
+        subject (an old blog or a film's fan site listing "best headphones"): don't read or \
+        cite them.
+
+        """ + task + """
+
+
+        After the answer, only if they would genuinely help: two or three short follow-up \
+        questions the person is likely to ask next, in the language of the answer, each on \
+        its own line starting with "\(followUpMark) ". Nothing after them.
+        """
+    }
+
+    private static func appleInstructions(_ depth: ResearchDepth, language: WritingLanguage?) -> String {
+        let length = switch depth {
+        case .quick: "Answer in one to three sentences."
+        case .standard: "Lead with what the person most likely wants to know."
+        case .deep: "Lead with what the person most likely wants to know, then the specifics the sources give: names, numbers, prices, dates and trade-offs."
+        }
+        // In a language Apple's models write badly (Croatian, say), they answer
+        // in English; Claude answers in the language itself.
+        let language = switch language {
+        case .some(let language) where !language.appleWritesWell:
+            "The answer was to be in \(language.english), which you write poorly: write the whole answer in English."
+        case .some(let language): language.instruction
+        case nil: "Write in the language of the question."
+        }
+        return """
+        You are the "Browse for Me" feature of a phone browser. The app has searched the web and \
+        read the pages below for you. Answer the question using only these sources. Where they \
+        disagree, say so. If they don't answer the question, say so once, in the first lines; \
+        otherwise write only about what they do say, never about what they leave out. Write the \
+        answer itself, not about the sources ("the sources describe..."). \
+        \(language) Never repeat a point. \(length)
+        """
+    }
+
+    func run() async {
+        // The language to answer in: chosen in Settings, or the question's own
+        // (a follow-up like "i zimi?" is too short to tell, so the page's first
+        // question counts too).
+        let language = AnswerLanguage.target(for: ([query] + context.map(\.question)).joined(separator: "\n"))
+        lookForVideos(language: language)
+        // Apple's cloud model, fed by our own search, is the default; Claude
+        // (which searches by itself) is the fallback; the small on-device model
+        // is the last resort, working from search snippets and short excerpts.
+        // A language Apple's models write badly goes to Claude first.
+        if language?.appleWritesWell == false, let client = ClaudeClient.configured {
+            await runClaude(client, language: language)
+            return
+        }
+        if let cloud = AppleModels.cloudIfAvailable,
+           await runApple(cloud, budget: await AppleModels.characterBudget(of: cloud, reservingTokens: 1_500),
+                          perPage: 6_000, label: "Apple Intelligence", language: language) {
+            return
+        }
+        if let client = ClaudeClient.configured {
+            await runClaude(client, language: language)
+            return
+        }
+        if AppleModels.onDeviceAvailable,
+           await runApple(SystemLanguageModel.default, budget: AppleModels.onDeviceCharacterBudget(),
+                          perPage: 700, label: "On-device", language: language) {
+            return
+        }
+        if case .failed = phase { return }
+        // Apple's model was tried and failed: say how, not that it's missing.
+        phase = .failed(appleError.flatMap { AppleModels.explain($0, doing: "answer this") }
+            ?? "Browse for Me needs Apple Intelligence on this iPhone, or a Claude API key in Settings.")
+    }
+
+    /// Why Apple's model last failed here, for the message if nothing else answers.
+    @ObservationIgnored private var appleError: Error?
+
+    /// Returns false (leaving the next engine to try) when the model itself fails.
+    private func runApple(_ model: some LanguageModel, budget: Int, perPage: Int, label: String,
+                          language: WritingLanguage?) async -> Bool {
+        do {
+            phase = .searching(query)
+            // A follow-up leans on the page's question ("how long does the
+            // festival last?" after Oktoberfest); searched alone it found Diwali.
+            let searchFor = context.first.map { "\($0.question.prefix(100)) \(query)" } ?? query
+            let results = try await WebResearcher.search(searchFor)
+            guard !results.isEmpty else {
+                phase = .failed("The search came back empty. Try wording it differently.")
+                return true
+            }
+            let candidates = Array(results.prefix(depth.pages))
+            steps = candidates.map { Step(url: $0.url, state: .reading) }
+            phase = .reading(candidates.count)
+            var pages = await WebResearcher.read(candidates, perPageLimit: perPage) { [weak self] url, useful in
+                guard let self, let index = self.steps.firstIndex(where: { $0.url == url }) else { return }
+                self.steps[index].state = useful ? .read : .skipped
+            }
+            images = Array(WebResearcher.distinctImages(pages.compactMap(\.image)).prefix(4))
+            // Pages that wouldn't load still contribute their search snippet.
+            if pages.count < 2 { pages = candidates.map { var page = $0; page.text = $0.snippet; return page } }
+            // Videos that say enough about themselves (a recipe, the steps, the
+            // chapters) are read like pages, after the pages.
+            for video in await videosFound(within: .seconds(2)).filter({ $0.notes.count > 250 }).prefix(2) {
+                pages.append(WebResearcher.Page(url: video.url, title: video.title, snippet: "",
+                                                text: "A YouTube video by \(video.channel), \(video.length) long. Its description:\n"
+                                                    + String(video.notes.prefix(perPage))))
+            }
+            sources = pages.map { AnswerSource(url: $0.url, title: $0.title) }
+
+            // A follow-up carries the page so far, briefly, so "and in winter?" makes sense.
+            var prompt = context.isEmpty ? "" : "Earlier on this page:\n" + context.map {
+                "Q: \($0.question)\nA: \($0.answer.prefix(600))"
+            }.joined(separator: "\n\n") + "\n\n"
+            prompt += "Question: \(query)\n\nSources:\n"
+            for (index, page) in pages.enumerated() {
+                let entry = "\n[\(index + 1)] \(page.title) (\(page.url.displayHost))\n\(page.text)\n"
+                if prompt.count + entry.count > budget {
+                    prompt += String(entry.prefix(max(0, budget - prompt.count)))
+                    break
+                }
+                prompt += entry
+            }
+
+            engine = label
+            phase = .writing
+            let instructions = Self.appleInstructions(depth, language: language)
+            // A quick question gets the short shape: no sections to fill out.
+            let answer = depth == .quick
+                ? AppleModels.streamAnswer(model, shape: BriefAnswer.self, instructions: instructions, prompt: prompt)
+                : AppleModels.streamAnswer(model, shape: ResearchedAnswer.self, instructions: instructions, prompt: prompt)
+            for try await snapshot in answer { text = snapshot }
+            // Cancelled, the stream just ends: closed, not done.
+            try Task.checkCancellation()
+            phase = .done
+            SavedStats.answer(pagesRead: pages.count, answerWords: SavedStats.words(in: text))
+            return true
+        } catch is CancellationError {
+            return true
+        } catch {
+            // Closed mid-way (a cancelled request fails as URLError.cancelled):
+            // leave it as it was, and don't go on to the next engine.
+            if Task.isCancelled { return true }
+            appleError = error
+            text = ""
+            sources = []
+            steps = []
+            images = []
+            phase = .searching(query)
+            return false
+        }
+    }
+
+    private func runClaude(_ client: ClaudeClient, language: WritingLanguage?) async {
+        engine = "Claude"
+        do {
+            do {
+                try await streamClaude(client, model: depth.model, language: language)
+            } catch let error as ClaudeError where error.isRefusal && depth.model == .haiku && !Task.isCancelled {
+                // Haiku declined (it has no fallback of its own): Sonnet answers instead.
+                // Only then: a dropped connection isn't helped by the slower,
+                // dearer model, and retrying on it spent half a minute for nothing.
+                text = ""
+                sources = []
+                steps = []
+                found = []
+                images = []
+                stopLookingForPictures()
+                phase = .searching(query)
+                try await streamClaude(client, model: .sonnet, language: language)
+            }
+            try Task.checkCancellation()
+            // An answer that cites nothing still shows where it looked.
+            if sources.isEmpty { sources = Array(found.prefix(6)) }
+            phase = .done
+            SavedStats.answer(pagesRead: max(steps.count, sources.count), answerWords: SavedStats.words(in: text))
+        } catch is CancellationError {
+            return
+        } catch {
+            if !Task.isCancelled { phase = .failed(error.localizedDescription) }
+        }
+    }
+
+    private func streamClaude(_ client: ClaudeClient, model: ClaudeClient.Model, language: WritingLanguage?) async throws {
+        // Claude searches the web itself, but not YouTube: what the top videos
+        // say about themselves goes along with the question, if they're found
+        // in time (the search started with the page; this waits at most a moment).
+        var prompt = query
+        let described = await videosFound(within: .milliseconds(1_500)).filter { $0.notes.count > 250 }.prefix(3)
+        if !described.isEmpty {
+            prompt += "\n\n<youtube_videos>\nThe top YouTube videos on this, with their own descriptions. Use what "
+                + "they say like any source; where watching one would genuinely help (a technique, a repair), "
+                + "name it in passing by its title. The app shows them under the answer.\n"
+            for video in described {
+                prompt += "\n\"\(video.title)\" by \(video.channel) (\(video.length), \(video.views)):\n\(video.notes.prefix(1_500))\n"
+            }
+            prompt += "</youtube_videos>"
+        }
+        for try await event in client.stream(system: Self.claudeInstructions(depth, language: language), prompt: prompt, history: context,
+                                             model: model, effort: depth.effort, searches: depth.searches) {
+            switch event {
+            case .searching(let query):
+                phase = .searching(query)
+            case .usingTool:
+                // Whatever it wrote so far was it thinking aloud between searches.
+                if !text.isEmpty {
+                    text = ""
+                    phase = .searching(query)
+                }
+            case .result(let page):
+                // Search hits: a few on the live list while it works, the rest
+                // kept in case the answer cites nothing.
+                guard !JunkSites.contains(page.url), !found.contains(where: { $0.url.displayHost == page.url.displayHost }) else { break }
+                found.append(page)
+                if steps.count < 8 { steps.append(Step(url: page.url, state: .read)) }
+                lookForPicture(on: page.url)
+            case .source(let page):
+                // Cited by the answer: these are its sources.
+                if !JunkSites.contains(page.url), !sources.contains(where: { $0.url.displayHost == page.url.displayHost }) { sources.append(page) }
+            case .cited(let pages):
+                // A small number after the passage, for the source card it came
+                // from: "[[2]]", which the page draws as a tappable mark.
+                let numbers = pages.compactMap { page in sources.firstIndex { $0.url.displayHost == page.url.displayHost } }
+                    .map { $0 + 1 }
+                    .reduce(into: [Int]()) { if !$0.contains($1) { $0.append($1) } }
+                if !numbers.isEmpty, !text.isEmpty {
+                    text += "[[" + numbers.prefix(3).map(String.init).joined(separator: ",") + "]]"
+                }
+            case .text(let chunk):
+                text += chunk
+                phase = .writing
+            }
+        }
+    }
+
+    // MARK: Videos
+
+    @ObservationIgnored private var videoSearch: Task<[YouTube.Video], Never>?
+
+    /// Starts looking on YouTube alongside the web search, for questions with
+    /// room for it: a quick fact gets no videos. The row shows them as soon as
+    /// they're found; their descriptions follow for the model to read.
+    private func lookForVideos(language: WritingLanguage?) {
+        guard depth != .quick else { return }
+        let hl = language?.code ?? Audience.languages.first ?? "en"
+        let searchFor = context.first.map { "\($0.question.prefix(100)) \(query)" } ?? query
+        videoSearch = Task { [weak self] in
+            let found = await YouTube.search(searchFor, language: hl)
+            guard !Task.isCancelled else { return [] }
+            await MainActor.run { self?.videos = found }
+            return await YouTube.describe(Array(found.prefix(3)), language: hl)
+        }
+    }
+
+    /// The videos with their descriptions, or none if they take longer than `limit`.
+    private func videosFound(within limit: Duration) async -> [YouTube.Video] {
+        guard let videoSearch else { return [] }
+        return await withTaskGroup(of: [YouTube.Video]?.self) { group in
+            group.addTask { await videoSearch.value }
+            group.addTask { try? await Task.sleep(for: limit); return nil }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? []
+        }
+    }
+
+    /// Pages Claude's searches turned up, whether or not the answer used them.
+    private var found: [AnswerSource] = []
+
+    /// Claude reads pages on its own servers, so their pictures aren't at hand:
+    /// the first few hits' share images are fetched alongside, while it works.
+    /// Each holds a place in the row of pictures until it's found or not. The
+    /// first words usually come before the pictures do, and a row appearing
+    /// above them then would push the text being read down.
+    private func lookForPicture(on url: URL) {
+        // Once the answer shows, only into a row that's already there.
+        guard pictureLookups.count < 4, isWorking || !images.isEmpty || pendingPictures > 0 else { return }
+        pendingPictures += 1
+        pictureLookups.append(Task { [weak self] in
+            let image = await WebResearcher.shareImage(of: url)
+            guard let self, !Task.isCancelled else { return }
+            pendingPictures -= 1
+            if let image { images = WebResearcher.distinctImages(images + [image]) }
+        })
+    }
+
+    /// Pictures still being looked for, shown as empty tiles.
+    private(set) var pendingPictures = 0
+    @ObservationIgnored private var pictureLookups: [Task<Void, Never>] = []
+
+    private func stopLookingForPictures() {
+        pictureLookups.forEach { $0.cancel() }
+        pictureLookups = []
+        pendingPictures = 0
+    }
+}
+
+/// How much digging a question deserves, judged from its words alone: on the
+/// phone, instantly, with no model call. A quick fact wants its answer now; a
+/// comparison, a "best", a plan or a long question wants more sources and room.
+nonisolated enum ResearchDepth: Equatable {
+    case quick, standard, deep
+
+    static func of(_ question: String) -> ResearchDepth {
+        let words = question.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        // Padded with spaces so a cue matches whole words (or, for Croatian, word stems).
+        let text = " " + words.joined(separator: " ") + " "
+        guard let first = words.first else { return .standard }
+        let asksForAFact = quickStarts.contains(first)
+            || first == "how" && words.count > 1 && howMuch.contains(words[1])
+        // "or" makes a comparison ("iPhone or Pixel"), but not in a fact
+        // question ("is it open or closed today").
+        let compares = !asksForAFact && (text.contains(" or ") || text.contains(" ili "))
+        if words.count >= 12 || compares || deepCues.contains(where: text.contains) { return .deep }
+        // A recipe, a how-to or an explanation needs room, however short the question.
+        if roomCues.contains(where: text.contains) { return .standard }
+        if words.count <= 3 || words.count <= 7 && asksForAFact { return .quick }
+        return .standard
+    }
+
+    /// Choosing or planning: comparisons, the best of something, whether it's
+    /// worth it, a trip. Explanations ("why", "how does") are standard: one
+    /// good source explains as well as eight.
+    fileprivate static let deepCues = [
+        " vs ", " versus ", " compare", " comparison", " difference", " pros and cons", " best ", " top ",
+        " review", " should i ", " worth ", " alternative", " plan ", " itinerary", " guide", " recommend",
+        " usporedb", " razlik", " najbolj", " isplati", " prednost", " nedostat", " mane ", " recenzij",
+        " preporu", " vodič", " savjet", " ideje ",
+    ]
+    private static let roomCues = [" recipe", " recept", " how to ", " kako ", " tutorial", " upute", " steps ",
+                                   " explain", " objasni", " why ", " zašto ", " zasto "]
+    private static let quickStarts: Set<String> = [
+        "what", "who", "when", "where", "which", "whose", "is", "are", "was", "were", "does", "did", "can",
+        "koliko", "kolika", "kada", "kad", "tko", "gdje", "koji", "koja", "koje", "što", "sto", "je", "ima",
+    ]
+    private static let howMuch: Set<String> = ["many", "much", "old", "tall", "long", "far", "big", "fast"]
+
+    /// Pages read for Apple's models, which get no searches of their own.
+    var pages: Int {
+        switch self { case .quick: 3; case .standard: 6; case .deep: 8 }
+    }
+
+    /// Claude's web searches. Each one adds its results to what every later
+    /// step re-reads, so more searches cost time and tokens twice over.
+    var searches: Int {
+        switch self { case .quick: 2; case .standard: 3; case .deep: 6 }
+    }
+
+    /// Haiku streams its answer from the first word; Sonnet's arrives in one
+    /// burst once mostly written. So Haiku for everything but the questions
+    /// that need weighing many sources.
+    var model: ClaudeClient.Model { self == .deep ? .sonnet : .haiku }
+
+    /// Whether a typed query asks for an answer rather than for a page: a
+    /// question ("can dogs eat grapes", "zašto…"), a comparison or a decision.
+    /// Keywords, site names, weather, maps and logins stay searches: the
+    /// search engine's own results answer those better.
+    static func prefersAnswer(_ query: String) -> Bool {
+        let words = query.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        guard words.count >= 3, let first = words.first else { return false }
+        let text = " " + words.joined(separator: " ") + " "
+        if searchCues.contains(where: text.contains) { return false }
+        return query.trimmingCharacters(in: .whitespaces).hasSuffix("?")
+            || questionStarts.contains(first)
+            // A long query is a question in all but its punctuation.
+            || words.count >= 6
+            || text.contains(" or ") || text.contains(" ili ")  // "iPhone or Pixel": a choice
+            || deepCues.contains(where: text.contains)
+    }
+
+    private static let questionStarts: Set<String> = [
+        "what", "who", "whose", "when", "where", "why", "how", "which", "should", "can", "could", "would",
+        "will", "is", "are", "was", "were", "do", "does", "did",
+        "što", "sto", "šta", "tko", "kada", "kad", "gdje", "zašto", "zasto", "kako", "koji", "koja", "koje",
+        "koliko", "kolika", "je", "ima", "isplati", "trebam", "trebaš", "mogu", "može", "smijem", "kakav", "kakva",
+        "kakvo", "čiji", "ciji", "objasni", "usporedi", "explain", "compare", "tell",
+    ]
+    private static let searchCues = [
+        " weather", " vrijeme u ", " prognoza", " near me", " u blizini", " login", " log in", " sign in",
+        " prijava", " download", " preuzmi", " youtube", " reddit", " wikipedia", " map ", " maps ",
+        " karta ", " lyrics", " tekst pjesme", " live ", " uživo", " stock price",
+    ]
+
+    /// Deep questions get more sources and room, not more thinking: high
+    /// effort spent 16 s thinking before the first word, measured on a phone.
+    var effort: String {
+        switch self { case .quick: "low"; case .standard, .deep: "medium" }
+    }
+}
+
+/// The language an answer will be written in, as far as choosing a model goes:
+/// The topics a section can be tagged with; each is a Phosphor icon in the assets.
+nonisolated enum AnswerTopic {
+    /// Only topics whose icon can't be mistaken: "device" put a phone beside a
+    /// coffee machine, "idea" a bulb beside anything. A section that fits none
+    /// has no icon.
+    static let all = ["check", "warning", "money", "time", "date", "place", "people", "privacy", "speed", "star",
+                      "health", "battery", "nature", "food", "travel", "sport", "law", "news", "compare", "weather"]
+    static let vocabulary = all.joined(separator: ", ")
+}
