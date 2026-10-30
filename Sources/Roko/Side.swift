@@ -668,6 +668,8 @@ struct SideBar: View {
                         rowItem(tab, tabs: browser.tabs, splits: browser.splits,
                                 activeID: browser.activeID, interactive: true, pill: pill,
                                 close: { browser.closeTab(tab) })
+                        .background { JoinMark(id: tab.id, sign: false) }
+                        .overlay(alignment: .trailing) { JoinMark(id: tab.id, sign: true) }
                         // Positions here are among the loose rows; the pinned block
                         // sits in front of them in the real list.
                         .modifier(Carried(index: index, count: loose.count, step: step, vertical: true,
@@ -675,7 +677,12 @@ struct SideBar: View {
                                           groupDestination: { source, point in destination(source, at: point) },
                                           outside: { browser.dragOut(tab) }, browser: browser, tab: tab,
                                           cross: { cross(tab, $0, from: .rows) },
-                                          land: { land(tab, $0) }, faded: crossing?.tab == tab.id) {
+                                          land: { land(tab, $0) }, faded: crossing?.tab == tab.id,
+                                          joinable: { at in
+                                              guard prefs.splitView, loose.indices.contains(at) else { return nil }
+                                              let other = loose[at]
+                                              return browser.split(for: other) == nil && browser.canSplit(tab, with: other) ? other : nil
+                                          }) {
                             if prefs.usesTabGroups {
                                 browser.move(tab, within: nil, to: $0)
                             } else {
@@ -1557,5 +1564,32 @@ struct PinCarried: ViewModifier {
         let point = CGPoint(x: start.midX + travel.width, y: start.midY + travel.height)
         func distance(_ cell: CGRect) -> CGFloat { hypot(cell.midX - point.x, cell.midY - point.y) }
         return cells.indices.min { distance(cells[$0]) < distance(cells[$1]) } ?? from
+    }
+}
+
+
+/// A tab another is held over the middle of (TabDrag.joining): lit as a row
+/// is, with the split's mark at its end, for the pair letting go would make.
+private struct JoinMark: View {
+    @ObservedObject private var drag = TabDrag.shared
+    @Environment(\.greys) private var greys
+    let id: Tab.ID
+    let sign: Bool
+
+    var body: some View {
+        if drag.joining == id {
+            if sign {
+                Image(systemName: "rectangle.split.2x1")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Palette.ink)
+                    .padding(.trailing, 10)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("Let go to split")
+            } else {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(greys.wash)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 }

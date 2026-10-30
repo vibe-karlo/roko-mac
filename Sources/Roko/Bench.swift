@@ -357,6 +357,13 @@ final class Bench {
             // private: a private tab, on a SEARCH_PROBE run only.
             let shy = request["private"] as? Bool == true
             guard !shy || Store.testing else { answer(["error": "open private only works on a --test run"]); return }
+            // plain: an ordinary tab of the row, not the bench's, for the
+            // pictures on the site. A SEARCH_PROBE run only.
+            if request["plain"] as? Bool == true {
+                guard Store.testing else { answer(["error": "open plain only works on a --test run"]); return }
+                answer(describe(browser.open(url, foreground: true)))
+                return
+            }
             let tab = browser.benchOpen(url, shy: shy)
             house(tab)
             answer(describe(tab))

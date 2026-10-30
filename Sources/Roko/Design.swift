@@ -55,6 +55,9 @@ enum Palette {
         static let sideHover = pair(0.915, 0.13)
         static let sideTile = pair(0.925, 0.115)
         static let sidePinLive = pair(0.86, 0.19)
+        /// Raised off a tray: lighter in both looks, as light falls on it.
+        static let chip = pair(0.995, 0.225)
+        static let chipRest = pair(0.965, 0.155)
         /// The resting traffic lights, drawn by hand when the app is behind.
         static let resting = pair(0.80, 0.30)
         static let safe = tint(light: (0.08, 0.50, 0.24), dark: (0.29, 0.87, 0.50))
@@ -86,6 +89,11 @@ struct Greys {
     let hover: Color
     let tile: Color
     let pinLive: Color
+    /// A split's pages in the column, as Dia lays them: chips raised a step
+    /// off their tray, `chip` for the page with the keys in the split you're
+    /// in, `chipRest` for the rest (SplitTabItem).
+    var chip = Color(nsColor: Palette.NS.chip)
+    var chipRest = Color(nsColor: Palette.NS.chipRest)
 
     static let white = Greys(wash: Palette.wash, hover: Palette.hover,
                              tile: Palette.wash.opacity(0.55), pinLive: Palette.pinLive)

@@ -5,6 +5,15 @@ Newest first.
 
 ## 1.0.7 (30 October 2026)
 
+### Splits, as Dia shows them
+
+- In the sidebar a split is one row: its pages side by side as chips in a tray. In the split
+  you're in, the page with the keys is raised; a split you aren't in rests as a quieter tray.
+- Hold a tab over the middle of another in the sidebar and let go: the two become a split, the
+  one you carried on the right. Near a tab's edge it still just moves.
+- The sidebar's address bar keeps Copy link and Summarize side by side and out of sight until
+  you point at it. Summarize wears the Apple Intelligence mark.
+
 ### Learning and small comforts
 
 - ⌘T learns what you pick for what you type. Take Linear for "lin" once and "lin" puts it on top,

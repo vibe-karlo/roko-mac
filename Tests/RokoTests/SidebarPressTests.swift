@@ -59,6 +59,46 @@ final class SidebarPressTests: XCTestCase {
         XCTAssertNil(browser.editingTab)
     }
 
+    /// Held over the middle of another tab and let go: a split of the two,
+    /// the one carried on the right, as in Dia.
+    func testDraggingATabOntoAnotherSplitsThem() async throws {
+        let browser = makeBrowser()
+        browser.prefs.splitView = true
+        let (first, second) = (browser.tabs[0], browser.tabs[1])
+        let window = makeWindow(browser)
+        try await settle()
+        let start = rowPoint(0, in: window)
+        try await send(.leftMouseDown, at: start, in: window)
+        for distance in [8.0, 20, 30] {
+            try await send(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - distance), in: window)
+        }
+        XCTAssertEqual(TabDrag.shared.joining, second.id)
+        try await send(.leftMouseUp, at: NSPoint(x: start.x, y: start.y - 30), in: window)
+        try await settle()
+        let pair = try XCTUnwrap(browser.split(for: first))
+        XCTAssertEqual(pair.tabs, [second.id, first.id])
+        XCTAssertNil(TabDrag.shared.joining)
+    }
+
+    /// Past a tab's middle, between two rows: it moves, and splits nothing.
+    func testDraggingBetweenTabsStillReorders() async throws {
+        let browser = makeBrowser()
+        browser.prefs.splitView = true
+        let first = browser.tabs[0]
+        let window = makeWindow(browser)
+        try await settle()
+        let start = rowPoint(0, in: window)
+        try await send(.leftMouseDown, at: start, in: window)
+        for distance in [8.0, 20, 30, 45] {
+            try await send(.leftMouseDragged, at: NSPoint(x: start.x, y: start.y - distance), in: window)
+        }
+        XCTAssertNil(TabDrag.shared.joining)
+        try await send(.leftMouseUp, at: NSPoint(x: start.x, y: start.y - 45), in: window)
+        try await settle()
+        XCTAssertNil(browser.split(for: first))
+        XCTAssertEqual(browser.tabs[1].id, first.id)
+    }
+
     func testSiblingControlsDoNotSelectTheRow() async throws {
         _ = NSApplication.shared
         var selected = 0
@@ -103,8 +143,9 @@ final class SidebarPressTests: XCTestCase {
         browser.select(tabs[2])
         let window = makeWindow(browser)
         try await settle()
+        // Side by side on one row, as Dia lays a split: left page, then right.
         for index in [0, 1] {
-            let point = NSPoint(x: 70, y: window.frame.height - Metrics.strip - 14 - CGFloat(index) * 28)
+            let point = NSPoint(x: 40 + CGFloat(index) * browser.prefs.sideWidth / 2, y: window.frame.height - Metrics.strip - 14)
             try await send(.leftMouseDown, at: point, in: window)
             XCTAssertEqual(browser.activeID, tabs[index].id)
             try await send(.leftMouseUp, at: point, in: window)

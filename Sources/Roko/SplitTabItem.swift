@@ -1,19 +1,16 @@
 import SwiftUI
 
-/// A pair's one place in the row. In the column its pages are two lines, one
-/// under the other, joined by a hairline: halves side by side in 232 points
-/// would cut most titles to a dozen letters. Across the top they sit side by
-/// side, with a single cross at the end for the half under the pointer — two
-/// crosses next to each other are two chances to close the wrong page.
+/// A pair's one place in the row. In the column, as Dia has it: one row, its
+/// pages side by side as chips in a tray. The tray is the row's grey, the live
+/// one when the split is where you are, so the live grey still glides from a
+/// tab to the split and back; in it the page the keys go to is a chip raised
+/// a step off the tray, the others flat until the pointer comes. A split you
+/// aren't in rests as a quieter tray with every page a quiet chip.
 ///
-/// The page the keys go to wears the live grey, the same one that glides
-/// from tab to tab, so it glides from one half to the other too.
-///
-/// The pair reads as one thing: a faint ground of its own under both halves
-/// and an outline round them, with a fine line between the halves while
-/// neither is lit. Two lit halves — the live one and the one under the
-/// pointer — meet square where they touch, so the two greys join with no
-/// notch between their corners.
+/// Across the top they sit side by side, with a single cross at the end for
+/// the half under the pointer — two crosses next to each other are two
+/// chances to close the wrong page. There the page the keys go to wears the
+/// live grey itself, and two lit halves meet square where they touch.
 struct SplitTabItem: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
@@ -43,19 +40,14 @@ struct SplitTabItem: View {
     var body: some View {
         Group {
             if stacked {
-                VStack(spacing: 0) {
+                HStack(spacing: 3) {
                     half(left, first: true)
                     if let middle { half(middle, first: false, last: false) }
                     half(right, first: false)
                 }
-                .overlay {
-                    Rectangle()
-                        .fill(Palette.hairline)
-                        .frame(height: 1)
-                        .padding(.horizontal, 10)
-                        .opacity(lit(left) || lit(right) ? 0 : 1)
-                        .allowsHitTesting(false)
-                }
+                .padding(3)
+                .frame(height: height)
+                .background { tray }
             } else {
                 HStack(spacing: 0) {
                     half(left, first: true)
@@ -81,21 +73,37 @@ struct SplitTabItem: View {
             }
         }
         .background {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(greys.tile)
-                .padding(.vertical, inset)
-                .allowsHitTesting(false)
+            if !stacked {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(greys.tile)
+                    .padding(.vertical, inset)
+                    .allowsHitTesting(false)
+            }
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(Palette.hairline, lineWidth: 1)
-                .padding(.vertical, inset)
-                .allowsHitTesting(false)
+            if !stacked {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Palette.hairline, lineWidth: 1)
+                    .padding(.vertical, inset)
+                    .allowsHitTesting(false)
+            }
         }
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Split tabs")
         .animation(Motion.quick, value: hovered)
+    }
+
+    /// The column's tray: the live grey while the split is where you are,
+    /// carried in from the tab before as a tab's own grey is.
+    @ViewBuilder
+    private var tray: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        if live {
+            shape.fill(greys.wash).matchedGeometryEffect(id: "live", in: pill)
+        } else {
+            shape.fill(greys.tile)
+        }
     }
 
     /// A half wearing a grey: the live one, a selected one, the one under
@@ -115,6 +123,7 @@ struct SplitTabItem: View {
             prefs: prefs,
             tab: tab,
             focused: focused == tab.id,
+            live: live,
             stacked: stacked,
             first: first,
             middle: !first && !last,
@@ -126,7 +135,7 @@ struct SplitTabItem: View {
             pill: pill,
             hovered: $hovered
         )
-        .frame(maxWidth: .infinity, maxHeight: stacked ? height : .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// Across the top: one cross, at the end of the item, for whichever half
@@ -162,6 +171,8 @@ private struct SplitTabHalf: View {
     @ObservedObject var prefs: Preferences
     @ObservedObject var tab: Tab
     let focused: Bool
+    /// The split is where you are: in the column, its tray is lit.
+    var live = false
     let stacked: Bool
     /// The top half in the column, the left one across the top.
     let first: Bool
@@ -186,14 +197,16 @@ private struct SplitTabHalf: View {
     private var editing: Bool { browser.editingTab == tab.id }
     /// Where the page is, said on the half you're on (Settings › Tabs › Show
     /// the address on the tab you're on).
-    private var rest: AtRest? { focused && !editing && !narrow ? AtRest.said(tab.restAddress, always: prefs.showsAddress) : nil }
+    private var rest: AtRest? { focused && !editing && !narrow && !stacked ? AtRest.said(tab.restAddress, always: prefs.showsAddress) : nil }
+    /// In the column: the raised chip, the page the keys go to in the split you're in.
+    private var raised: Bool { stacked && live && focused }
     private var atRest: Bool { rest != nil }
 
     private var laidOut: some View {
         row
             .padding(.leading, stacked ? 0 : 9)
-            .padding(.trailing, stacked ? 7 : 4)
-            .frame(height: stacked ? height : Self.pillHeight)
+            .padding(.trailing, 4)
+            .frame(height: stacked ? max(0, height - 6) : Self.pillHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background { ground.animation(Motion.quick, value: stacked && focused).animation(Motion.quick, value: joined) }
             .frame(height: height)
@@ -213,7 +226,7 @@ private struct SplitTabHalf: View {
             })
             .overlay {
                 if browser.selectedTabIDs.contains(tab.id) {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    RoundedRectangle(cornerRadius: stacked ? 7 : 9, style: .continuous)
                         .strokeBorder(Palette.ink.opacity(0.35), lineWidth: 1)
                         .allowsHitTesting(false)
                 }
@@ -272,7 +285,9 @@ private struct SplitTabHalf: View {
 
     @ViewBuilder
     private var ground: some View {
-        if focused {
+        if stacked {
+            chip
+        } else if focused {
             ZStack(alignment: .leading) {
                 Rectangle().fill(greys.wash)
                 if prefs.showsReading, !narrow {
@@ -290,12 +305,35 @@ private struct SplitTabHalf: View {
         }
     }
 
+    /// In the column: a chip on the tray. Raised for the page with the keys,
+    /// quiet for a split you aren't in, flat for the others until pointed at.
+    @ViewBuilder
+    private var chip: some View {
+        let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        if raised {
+            ZStack(alignment: .leading) {
+                Rectangle().fill(greys.chip)
+                if prefs.showsReading, !narrow {
+                    GeometryReader { geo in
+                        ReadingFill(meter: tab.meter, width: geo.size.width)
+                    }
+                }
+            }
+            .clipShape(shape)
+        } else if !live {
+            shape.fill(hovering || browser.selectedTabIDs.contains(tab.id) ? greys.chip : greys.chipRest)
+        } else if hovering || browser.selectedTabIDs.contains(tab.id) {
+            shape.fill(greys.chipRest)
+        }
+    }
+
     private var row: some View {
-        HStack(spacing: stacked ? 8 : 5) {
+        HStack(spacing: stacked ? 4 : 5) {
             titleContent
-                .padding(.leading, stacked ? 10 : 0)
+                // Inside the press, so the chip's leading edge picks it too.
+                .padding(.leading, stacked ? 8 : 0)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: stacked ? height : 16)
+                .frame(height: stacked ? max(0, height - 6) : 16)
                 .contentShape(Rectangle())
                 .modifier(TabPress(enabled: stacked && interactive && !editing, active: focused, selected: $selectedOnPress) {
                     browser.clearTabSelection()
@@ -319,10 +357,10 @@ private struct SplitTabHalf: View {
             TabAddressField(browser: browser)
                 .frame(height: 16)
         } else {
-            HStack(spacing: stacked ? 8 : 5) {
+            HStack(spacing: stacked ? 6 : 5) {
                 if prefs.glyph == .icons || narrow {
-                    Mark(icon: tab.icon, letter: tab.monogram, size: stacked ? 15 : 13, dim: tab.asleep)
-                        .frame(width: stacked ? 15 : 13, height: stacked ? 15 : 13)
+                    Mark(icon: tab.icon, letter: tab.monogram, size: stacked ? 14 : 13, dim: tab.asleep)
+                        .frame(width: stacked ? 14 : 13, height: stacked ? 14 : 13)
                 }
                 if tab.shy {
                     Image(systemName: "eye.slash")
@@ -342,8 +380,9 @@ private struct SplitTabHalf: View {
                 }
                 if !narrow {
                     TitleAtRest(label: title, rest: rest, shown: atRest, hovering: hovering,
-                                size: stacked ? prefs.sideTitle : 12,
-                                colour: focused ? Palette.ink : hovering ? Palette.ink.opacity(0.7) : Palette.muted,
+                                // Two or three to a row: a point smaller, for a few more letters.
+                                size: stacked ? min(prefs.sideTitle, 12.5) : 12,
+                                colour: (stacked ? raised : focused) ? Palette.ink : hovering ? Palette.ink.opacity(0.7) : Palette.muted,
                                 roomy: stacked)
                 }
             }

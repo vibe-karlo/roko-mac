@@ -67,6 +67,9 @@ final class TabDrag: ObservableObject {
     }
 
     @Published private(set) var preview: Preview?
+    /// A tab another is held over the middle of in the column: let go, and
+    /// the two make a split (Carried.joinable). Its row says so.
+    @Published var joining: Tab.ID?
     @Published private(set) var cancelledID: Tab.ID?
     /// The tab whose card is under the hand, out of its row (see DragCard);
     /// its row fades while it is.

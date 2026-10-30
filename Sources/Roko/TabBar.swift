@@ -961,6 +961,10 @@ struct Carried: ViewModifier {
     var land: ((CGPoint?) -> Bool)? = nil
     /// Over that block: faint, so the place it opened shows through.
     var faded = false
+    /// The tab now at this place in the row, when the one carried could make
+    /// a split with it: held over the middle of that tab, as in Dia, and let
+    /// go there, the two become a pair. Nil where rows only reorder.
+    var joinable: ((Int) -> Tab?)? = nil
     let move: (Int) -> Void
 
     @State private var held = false
@@ -970,6 +974,24 @@ struct Carried: ViewModifier {
     @State private var from = 0
     @State private var travel: CGFloat = 0
     @State private var reordered = false
+    /// Over the middle of this tab: let go, and the two make a split.
+    @State private var joining: Tab?
+
+    /// Where the row would go, and the tab it is over the middle of. Without
+    /// splits a row swaps at half a place, as ever; with them the middle of
+    /// each tab it passes is kept for joining, so it swaps once past it.
+    private func place(_ travel: CGFloat) -> (target: Int, join: Tab?) {
+        let rel = travel / step
+        guard let joinable, let tab, browser?.split(for: tab) == nil else {
+            return (from + Int(rel.rounded()), nil)
+        }
+        let nearest = rel.rounded()
+        if nearest != 0, abs(rel - nearest) < 0.3, let other = joinable(from + Int(nearest)), other.id != tab.id {
+            return (from + Int(nearest) - (nearest > 0 ? 1 : -1), other)
+        }
+        let passed = rel >= 0 ? rel.rounded(.down) : rel.rounded(.up)
+        return (from + Int(passed), nil)
+    }
 
     func body(content: Content) -> some View {
         // What it has travelled, less the ground its new place has already
@@ -1018,15 +1040,26 @@ struct Carried: ViewModifier {
                         // it is let go (see GroupDropFrames.resolve) rather
                         // than moving along the row as it goes.
                         if let browser, let tab, browser.prefs.usesTabGroups, tab.pin == nil,
-                           browser.group(of: tab) != nil || groupDestination?(tab, value.location) != nil { return }
-                        let target = min(max(0, from + Int((travel / step).rounded())), count - 1)
+                           browser.group(of: tab) != nil || groupDestination?(tab, value.location) != nil {
+                            setJoining(nil)
+                            return
+                        }
+                        let placed = place(travel)
+                        setJoining(placed.join)
+                        let target = min(max(0, placed.target), count - 1)
                         if target != index {
                             reordered = true
                             withAnimation(Motion.settle) { move(target) }
                         }
                     }
                     .onEnded { value in
-                        if let browser, let tab, browser.prefs.splitView {
+                        if let browser, let tab, let other = joining {
+                            // Let go over the middle of another tab: a pair,
+                            // the one carried on its right, as Dia makes one.
+                            _ = TabDrag.shared.finish(browser: browser, tab: tab)
+                            setJoining(nil)
+                            browser.pair(tab, with: other, onLeft: false)
+                        } else if let browser, let tab, browser.prefs.splitView {
                             let finished = TabDrag.shared.finish(browser: browser, tab: tab)
                             let source = finished.source
                             // Let go over the pins, or out of them: theirs,
@@ -1057,6 +1090,7 @@ struct Carried: ViewModifier {
                             if let onDropTab, let tab { onDropTab(tab, value.location) }
                             else { onDrop?(value.location) }
                         }
+                        setJoining(nil)
                         withAnimation(Motion.settle) {
                             held = false
                             travel = 0
@@ -1067,11 +1101,22 @@ struct Carried: ViewModifier {
             .onReceive(TabDrag.shared.$cancelledID) { id in
                 guard id == tab?.id, held else { return }
                 _ = land?(nil)
+                setJoining(nil)
                 if reordered { move(from) }
                 held = false
                 travel = 0
                 reordered = false
             }
+    }
+}
+
+extension Carried {
+    /// The tab under the carried one's middle, said to the row that shows it
+    /// (TabDrag.joining).
+    fileprivate func setJoining(_ other: Tab?) {
+        if joining?.id != other?.id { joining = other }
+        let id = other?.id
+        if TabDrag.shared.joining != id { withAnimation(Motion.quick) { TabDrag.shared.joining = id } }
     }
 }
 

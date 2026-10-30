@@ -47,37 +47,38 @@ struct SideAddressBar: View {
             .help(url?.absoluteString ?? "Open an address (⌘L)")
             .accessibilityLabel(url.map { "Address: \($0.absoluteString)" } ?? "Open an address")
 
-            // Copy the link, as ⇧⌘C does: there while the pointer is on the
-            // bar, a tick for a moment once it is copied.
-            if url != nil, browser.active?.page == nil, hovering || copied {
-                Button(action: copy) {
-                    Image(systemName: copied ? "checkmark" : "link")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(copied ? Palette.ink : Palette.muted)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
+            // The page's two actions, side by side and only while the
+            // pointer is on the bar (or what they did still shows): copy the
+            // link, as ⇧⌘C does, a tick for a moment once copied; and
+            // summarize it, as ⇧⌘Y does, Apple Intelligence's mark (it
+            // writes the summary), in ink while the summary is up.
+            HStack(spacing: 0) {
+                if url != nil, browser.active?.page == nil, hovering || copied {
+                    Button(action: copy) {
+                        Image(systemName: copied ? "checkmark" : "link")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(copied ? Palette.ink : Palette.muted)
+                            .frame(width: 22, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy link (⇧⌘C)")
+                    .accessibilityLabel("Copy link")
+                    .transition(.opacity)
                 }
-                .buttonStyle(.plain)
-                .help("Copy link (⇧⌘C)")
-                .accessibilityLabel("Copy link")
-                .transition(.opacity)
-            }
-
-            // Summarize the page, as ⇧⌘Y does: always there on a web page,
-            // as Dia keeps its chat beside the address, so it is found
-            // without knowing the key. roko's Eclipse, in ink while the
-            // summary is up.
-            if summarizable {
-                Button { browser.toggleSummary() } label: {
-                    Logomark()
-                        .fill(summaryOpen ? Palette.ink : Palette.muted, style: FillStyle(eoFill: true))
-                        .frame(width: 12, height: 12)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
+                if summarizable, hovering || summaryOpen {
+                    Button { browser.toggleSummary() } label: {
+                        Image(systemName: "apple.intelligence")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(summaryOpen ? Palette.ink : Palette.muted)
+                            .frame(width: 22, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(summaryOpen ? "Close the summary (⇧⌘Y)" : "Summarize this page (⇧⌘Y)")
+                    .accessibilityLabel(summaryOpen ? "Close the summary" : "Summarize this page")
+                    .transition(.opacity)
                 }
-                .buttonStyle(.plain)
-                .help(summaryOpen ? "Close the summary (⇧⌘Y)" : "Summarize this page (⇧⌘Y)")
-                .accessibilityLabel(summaryOpen ? "Close the summary" : "Summarize this page")
             }
         }
         .padding(.leading, 10)
