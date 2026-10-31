@@ -4,8 +4,17 @@ import SwiftUI
 /// hairline as everything else that floats, and gone the moment it isn't wanted.
 struct FindBar: View {
     @ObservedObject var browser: Browser
+    /// The words and the page's answer, which only this bar watches.
+    @ObservedObject private var find: FindState
     var availableWidth: CGFloat? = nil
     var onPillFrame: ((CGRect) -> Void)? = nil
+
+    init(browser: Browser, availableWidth: CGFloat? = nil, onPillFrame: ((CGRect) -> Void)? = nil) {
+        self.browser = browser
+        _find = ObservedObject(wrappedValue: browser.find)
+        self.availableWidth = availableWidth
+        self.onPillFrame = onPillFrame
+    }
 
     @FocusState private var focused: Bool
 
@@ -18,7 +27,7 @@ struct FindBar: View {
     var body: some View {
         HStack(spacing: 6) {
             ZStack(alignment: .leading) {
-                if browser.needle.isEmpty {
+                if find.needle.isEmpty {
                     Text("Find on page")
                         .foregroundStyle(Palette.ink.opacity(0.3))
                 }
@@ -37,7 +46,7 @@ struct FindBar: View {
             if let status = browser.findStatus {
                 Text(status)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(browser.missed ? Color.red.opacity(0.8) : Palette.muted)
+                    .foregroundStyle(find.missed ? Color.red.opacity(0.8) : Palette.muted)
                     .monospacedDigit()
                     .lineLimit(1)
                     .fixedSize()
@@ -59,12 +68,12 @@ struct FindBar: View {
                 Toggle("Match case", isOn: $browser.matchCase)
                     .help("Match uppercase and lowercase letters exactly.")
                 Toggle("Whole words", isOn: $browser.wholeWords)
-                    .disabled(browser.findResult?.nativeFallback == true && !browser.wholeWords)
+                    .disabled(find.result?.nativeFallback == true && !find.wholeWords)
                     .help("Match complete words. This option is unavailable for PDF pages.")
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(browser.matchCase || browser.wholeWords ? Palette.ink : Palette.muted)
+                    .foregroundStyle(find.matchCase || find.wholeWords ? Palette.ink : Palette.muted)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
@@ -85,7 +94,7 @@ struct FindBar: View {
         .background(Palette.ground, in: Capsule())
         .overlay(
             Capsule().strokeBorder(
-                browser.missed ? Color.red.opacity(0.35) : Palette.hairline,
+                find.missed ? Color.red.opacity(0.35) : Palette.hairline,
                 lineWidth: 1
             )
         )
@@ -98,7 +107,7 @@ struct FindBar: View {
         .frame(maxWidth: availableWidth == nil ? nil : .infinity,
                maxHeight: availableWidth == nil ? nil : .infinity, alignment: .topTrailing)
         .coordinateSpace(name: "find")
-        .animation(Motion.quick, value: browser.missed)
+        .animation(Motion.quick, value: find.missed)
         .onAppear(perform: focus)
         .onChange(of: browser.findFocus) { _, _ in focus() }
     }

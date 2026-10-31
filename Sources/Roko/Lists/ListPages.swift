@@ -546,6 +546,9 @@ private struct Row: View {
                 Image(systemName: done ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(done ? Theme.faintInk : Theme.secondaryInk)
+                    .symbolSwap()
+                    // Ticked: the check lands with a small bounce.
+                    .symbolEffect(.bounce, value: done)
                     .frame(width: 22, height: 22)
                     .contentShape(Rectangle())
             }

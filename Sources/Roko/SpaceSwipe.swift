@@ -76,6 +76,9 @@ final class SpaceSwipe {
         }
         guard let browser = Browsers.browser(for: event.window), !browser.isPopup, browser.prefs.usesSpaces,
               !browser.folded || browser.peeking, overTabs(event, in: browser) else { return false }
+        // Still sliding from the last press: this one is taken, and waits
+        // its turn rather than snapping the slide short.
+        guard Date() > resting else { return true }
         self.browser = browser
         let here = browser.makingSpace ? browser.spaces.count : (browser.spaces.firstIndex { $0.id == browser.spaceID } ?? 0)
         let target = here + step
@@ -211,16 +214,53 @@ final class SpaceSwipe {
     /// where this one was; then it becomes the one on screen, in the same
     /// frame and without anything moving — it was already there. One past
     /// the last space is the card for a new one.
+    /// A space chosen by key (⌃1–9, ⌥⌘← →): slid in from its side as a swipe
+    /// brings it, as in Arc, where the rows used to dissolve into the next
+    /// space's all at once. False where there is nothing on screen to slide
+    /// (the column folded away), or a slide is still under way: the caller
+    /// then switches as before.
+    func step(_ browser: Browser, to target: Int) -> Bool {
+        guard browser.prefs.usesSpaces, !browser.makingSpace, !sliding, !Motion.reduced,
+              !browser.folded || browser.peeking, let window = browser.window, !window.isMiniaturized,
+              let here = browser.spaces.firstIndex(where: { $0.id == browser.spaceID }),
+              browser.spaces.indices.contains(target), target != here
+        else { return false }
+        self.browser = browser
+        browser.preloadSpaces()
+        slide(browser, to: target, from: here)
+        return true
+    }
+
+    /// A slide on its way: its end switches the space, so nothing else may.
+    private var sliding = false
+
     func slide(_ browser: Browser, to target: Int, from here: Int) {
         if browser.makingSpace, target != browser.spaces.count {
             browser.cancelSpaceCreation()
         }
+        sliding = true
+        browser.swipe.target = abs(target - here) > 1 ? target : nil
         // A page is the column's width, or the bar's height.
         let width = browser.prefs.sidebar ? browser.prefs.columnWidth : Metrics.strip
         let away: CGFloat = target > here ? -1 : 1
         browser.spaceStep = target > here ? 1 : -1
         resting = Date().addingTimeInterval(SpaceSwipe.rest)
-        withAnimation(.easeOut(duration: 0.22), completionCriteria: .removed) {
+        // The page coming in is put in place first, a hair into its move and
+        // without animation, so the slide carries it in beside this one. Made
+        // by the slide's end value instead, it stood where it ends up from
+        // the first frame while this one slid off from on top of it.
+        if browser.spaceSwipe == 0, !Motion.reduced {
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { browser.spaceSwipe = away * 0.5 }
+            DispatchQueue.main.async { self.finishSlide(browser, to: target, away: away, width: width) }
+        } else {
+            finishSlide(browser, to: target, away: away, width: width)
+        }
+    }
+
+    private func finishSlide(_ browser: Browser, to target: Int, away: CGFloat, width: CGFloat) {
+        withAnimation(Motion.slide, completionCriteria: .removed) {
             browser.spaceSwipe = away * width
         } completion: {
             var still = Transaction()
@@ -233,7 +273,9 @@ final class SpaceSwipe {
                     browser.switchSpace(to: browser.spaces[target].id)
                 }
                 browser.spaceSwipe = 0
+                browser.swipe.target = nil
             }
+            self.sliding = false
         }
     }
 }

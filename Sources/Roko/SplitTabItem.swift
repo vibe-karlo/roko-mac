@@ -30,6 +30,8 @@ struct SplitTabItem: View {
 
     @Environment(\.greys) private var greys
     @State private var hovered: Tab.ID?
+    /// The raised chip's, so it slides from page to page as the keys move.
+    @Namespace private var chips
 
     private var stacked: Bool { width == nil }
     /// Across the top, the outline is as tall as a tab's pill (28 points)
@@ -124,6 +126,7 @@ struct SplitTabItem: View {
             tab: tab,
             focused: focused == tab.id,
             live: live,
+            chips: chips,
             stacked: stacked,
             first: first,
             middle: !first && !last,
@@ -173,6 +176,7 @@ private struct SplitTabHalf: View {
     let focused: Bool
     /// The split is where you are: in the column, its tray is lit.
     var live = false
+    var chips: Namespace.ID? = nil
     let stacked: Bool
     /// The top half in the column, the left one across the top.
     let first: Bool
@@ -320,6 +324,7 @@ private struct SplitTabHalf: View {
                 }
             }
             .clipShape(shape)
+            .modifier(SlidingChip(space: chips))
         } else if !live {
             shape.fill(hovering || browser.selectedTabIDs.contains(tab.id) ? greys.chip : greys.chipRest)
         } else if hovering || browser.selectedTabIDs.contains(tab.id) {
@@ -354,7 +359,7 @@ private struct SplitTabHalf: View {
     @ViewBuilder
     private var titleContent: some View {
         if editing {
-            TabAddressField(browser: browser)
+            TabAddressField(browser: browser, edit: browser.tabEdit)
                 .frame(height: 16)
         } else {
             HStack(spacing: stacked ? 6 : 5) {
@@ -411,5 +416,14 @@ private struct SplitTabHalf: View {
                 CloseClick(armed: hovering) { browser.closeTab(tab) }
                     .frame(width: 26, height: height)
             }
+    }
+}
+
+/// The raised chip, matched across a split's pages so it slides between them.
+private struct SlidingChip: ViewModifier {
+    let space: Namespace.ID?
+
+    func body(content: Content) -> some View {
+        if let space { content.matchedGeometryEffect(id: "chip", in: space) } else { content }
     }
 }

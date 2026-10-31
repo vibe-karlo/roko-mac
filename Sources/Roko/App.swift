@@ -267,20 +267,20 @@ struct SearchApp: App {
                 if let tab = browser.active {
                     let rows = browser.prefs.showsPinRows
                     if tab.pin == nil {
-                        Button("Pin Tab") { browser.pin(tab) }
+                        Button("Pin Tab") { browser.fly(tab) { browser.pin(tab) } }
                             .disabled(!tab.isWeb || tab.shy)
                         if rows {
-                            Button("Pin Tab as Row") { browser.pin(tab, listed: true) }
+                            Button("Pin Tab as Row") { browser.fly(tab) { browser.pin(tab, listed: true) } }
                                 .disabled(!tab.isWeb || tab.shy)
                         }
                     } else {
                         if rows {
-                            Button(tab.listed ? "Show Pin as Square" : "Show Pin as Row") { browser.setListed(tab, !tab.listed) }
+                            Button(tab.listed ? "Show Pin as Square" : "Show Pin as Row") { browser.fly(tab) { browser.setListed(tab, !tab.listed) } }
                         }
                         if !(rows && tab.listed) {
                             Button("Change Letter") { browser.editLetter(tab) }
                         }
-                        Button("Unpin Tab") { browser.unpin(tab) }
+                        Button("Unpin Tab") { browser.fly(tab) { browser.unpin(tab) } }
                     }
                 }
                 Button("Tidy Tab Titles") { Tidy.titles(in: browser) }
@@ -485,6 +485,7 @@ struct ContentView: View {
             // With the tabs down the side, the ground the page's card and the
             // column sit on (see CardEdge).
             (fullscreenTab != nil ? Color.black : cards ? SiteTint.ground(browser.frameTint) : Palette.ground)
+                .animation(Motion.quick, value: browser.frameTint)
 
             // One stage, always. It starts beside the column and under the
             // strip, not behind them — a page sliding beneath floating chrome
@@ -565,6 +566,8 @@ struct ContentView: View {
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
+                // Declared above, and nothing ever ran it: the bar popped.
+                .animation(Motion.settle, value: browser.finding)
                 .overlay(alignment: .topTrailing) {
                     if let summary = browser.summary, summary.tab == tab.id {
                         SummaryPanel(browser: browser, summary: summary)
@@ -728,6 +731,9 @@ struct ContentView: View {
             }
         }
         .padding(.bottom, 30)
+        // On the stack the line is put into, not on the line: a view's own
+        // animation doesn't run for its coming and going, so it popped.
+        .animation(Motion.settle, value: browser.announcement)
         .animation(Motion.settle, value: browser.veiling)
         .animation(Motion.settle, value: browser.asking)
         .animation(Motion.settle, value: browser.offering)
@@ -905,6 +911,7 @@ struct ContentView: View {
             .onChange(of: browser.activeID) { _, _ in handBack() }
             .animation(Motion.settle, value: browser.welcoming)
             .animation(Motion.settle, value: browser.reviewing)
+            .animation(Motion.settle, value: browser.notifyingMe)
         .onAppear {
             watchKeys()
             browser.askFocus()
@@ -958,9 +965,11 @@ struct ContentView: View {
                 .padding(.vertical, 9)
                 .background(Palette.ground, in: Capsule())
                 .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
-                .shadow(color: .black.opacity(0.10), radius: 18, y: 6)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(Motion.settle, value: browser.announcement)
+                // Short and from above, as the card's: no cloud under it.
+                .shadow(color: .black.opacity(0.09), radius: 6, y: 3)
+                // A new line over one still up: the words change in place.
+                .contentTransition(.opacity)
+                .transition(.move(edge: .bottom).combined(with: .scale(scale: 0.94, anchor: .bottom)).combined(with: .opacity))
         }
     }
 

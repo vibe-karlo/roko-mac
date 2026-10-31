@@ -19,6 +19,8 @@ struct Omnibox: View {
 
     @State private var shake: CGFloat = 0
     @State private var refused = false
+    /// The arrow keys' mark, matched from row to row.
+    @Namespace private var picked
 
     /// Sized to a pane of a split rather than to the window.
     var fitted = false
@@ -182,9 +184,16 @@ struct Omnibox: View {
                         .padding(.top, index == 0 ? 2 : 12)
                         .padding(.bottom, 4)
                 }
-                Row(offer: offer, picked: browser.picked == index)
+                Row(offer: offer, picked: browser.picked == index, glide: picked)
                     .contentShape(Rectangle())
                     .onTapGesture { browser.take(offer) }
+                    // On an empty field, as the card opens: the rows come in
+                    // one after another, quickly. Never while typing, where
+                    // they follow each key at once.
+                    .transition(browser.typed.isEmpty && !Motion.reduced
+                                ? .opacity.combined(with: .offset(y: 5))
+                                    .animation(.easeOut(duration: 0.18).delay(Double(min(index, 8)) * 0.018))
+                                : .identity)
             }
         }
         .padding(.horizontal, 6)
@@ -243,6 +252,8 @@ struct Omnibox: View {
         /// Where the arrow keys have walked to. The pointer gets its own,
         /// quieter mark, and changes nothing but the look of the row.
         let picked: Bool
+        /// The list's, so the arrow keys' mark glides from row to row.
+        var glide: Namespace.ID? = nil
 
         @State private var hovering = false
 
@@ -330,7 +341,11 @@ struct Omnibox: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .background {
-                if picked {
+                if picked, let glide {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Palette.wash)
+                        .matchedGeometryEffect(id: "picked", in: glide)
+                } else if picked {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(Palette.wash)
                 } else if hovering {
@@ -410,6 +425,7 @@ private struct SiteOfferRow: View {
             if hovering { RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.hover) }
         }
         .onHover { hovering = $0 }
+        .animation(Motion.quick, value: hovering)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Search \(site.name), press Tab")
     }
@@ -467,7 +483,10 @@ private struct Breath: NSViewRepresentable {
             effectiveAppearance.performAsCurrentDrawingAppearance { glow.shadowColor = Palette.NS.ink.cgColor }
             CATransaction.commit()
             // From 0.97 to 1.03, from 0.65 to full, 2.6 s each way, for as
-            // long as the field is there.
+            // long as the field is there. Started once: the card growing as
+            // its list comes lays it out every frame, and adding it again
+            // each time restarted the breath, a dip under the field.
+            guard glow.animation(forKey: "breath") == nil, !Motion.reduced else { return }
             let size = CABasicAnimation(keyPath: "transform.scale")
             size.fromValue = 0.97
             size.toValue = 1.03

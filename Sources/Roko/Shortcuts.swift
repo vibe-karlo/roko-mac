@@ -276,7 +276,7 @@ struct Command: Identifiable {
     ] + (1...9).map { number in
         Command("spaces.\(number)", "Space \(number)", .spaces,
                 KeyCombo(String(number), command: false, control: true)) { browser in
-            browser.switchSpace(index: number - 1)
+            browser.goToSpace(index: number - 1)
         }
     }
 }
@@ -532,6 +532,12 @@ extension Browser {
     /// ⌥⌘→ and ⌥⌘←, as in Arc: the next space, or the one before.
     func stepSpace(_ step: Int) {
         guard let here = spaces.firstIndex(where: { $0.id == spaceID }) else { return }
-        switchSpace(index: here + step)
+        goToSpace(index: here + step)
+    }
+
+    /// A space by key: slid in from its side when the tabs are on screen.
+    func goToSpace(index: Int) {
+        if SpaceSwipe.shared.step(self, to: index) { return }
+        switchSpace(index: index)
     }
 }

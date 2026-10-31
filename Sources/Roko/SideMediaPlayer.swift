@@ -73,6 +73,7 @@ struct SideMediaPlayer: View {
                 Image(systemName: tab.noisy ? "pause.fill" : "play.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Palette.ink)
+                    .symbolSwap()
                     .frame(width: 26, height: 26)
                     .contentShape(Rectangle())
             }

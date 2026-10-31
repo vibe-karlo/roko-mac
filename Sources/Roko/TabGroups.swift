@@ -84,6 +84,7 @@ struct GroupHeading: View {
             Image(systemName: "chevron.down")
                 .font(.system(size: 6.5, weight: .bold))
                 .rotationEffect(.degrees(group.collapsed ? -90 : 0))
+                .animation(Motion.settle, value: group.collapsed)
         }
         .foregroundStyle(hovering ? Palette.ink.opacity(0.7) : Palette.muted)
         .frame(maxWidth: .infinity)
@@ -94,6 +95,7 @@ struct GroupHeading: View {
         .onTapGesture { browser.toggleTabGroup(group.id) }
         .modifier(GroupHeadingShared(browser: browser, group: group, dragSpace: dragSpace, dropping: $dropping))
         .onHover { hovering = $0 }
+        .animation(Motion.quick, value: hovering)
         .help(group.collapsed ? "\(group.name) — folded" : group.name)
         .accessibilityLabel(group.name)
         // Rename Group: no room for the name here, so it is typed beside.
@@ -158,6 +160,7 @@ struct GroupHeading: View {
         .onTapGesture { if !editing { browser.toggleTabGroup(group.id) } }
         .modifier(GroupHeadingShared(browser: browser, group: group, dragSpace: dragSpace, dropping: $dropping))
         .onHover { hovering = $0 }
+        .animation(Motion.quick, value: hovering)
         .onChange(of: editing) { _, now in
             if now {
                 draft = group.name

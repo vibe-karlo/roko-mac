@@ -5,6 +5,22 @@ Newest first.
 
 ## 1.0.7 (30 October 2026)
 
+### Motion
+
+- Things that should have moved and didn't now do: folders opening, splits forming, notices like
+  "Link copied", the find bar and Notify Me.
+- The tab you're on rolls its title away as its address comes in; a closed tab leaves at once and
+  the rows below slide up; ⌃1–9 and ⌥⌘← → slide spaces in from the side, as the swipe does.
+- Clear sweeps the tabs down the column one after another. Pin and Unpin from the menu fly the
+  tab into its square and back out into a row.
+- The floating video flies out of the page into its corner.
+- Icons morph (mute, play, reload, copied, done), buttons give a little under the press, ⌘T's
+  highlight glides between rows, a tab picked up lifts, and a tab opened behind glows a moment so
+  you see where it went.
+- A summary streams in at an even pace instead of in bursts.
+- Less work: a loading page, a swipe between spaces, a letter typed in a tab or the find bar, and
+  a tab opened past the point where the column scrolls no longer redraw every row.
+
 ### Splits, as Dia shows them
 
 - In the sidebar a split is one row: its pages side by side as chips in a tray. In the split

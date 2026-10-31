@@ -79,11 +79,14 @@ extension Browser {
     /// Put away: the page goes with the panel.
     func closePeek() {
         guard let page = peekTab else { return }
+        // The page goes once the panel has: closed under it while it still
+        // faded, a redraw asked the tab for a new web view.
         withAnimation(Motion.quick) {
             peekTab = nil
             peekFrom = nil
+        } completion: {
+            page.close()
         }
-        page.close()
     }
 
     /// Kept: a tab beside the one it was opened from, and in front. With
@@ -96,7 +99,11 @@ extension Browser {
         // Kept from a grouped tab, it joins that group, as a link opened
         // from there does (see open).
         if prefs.usesTabGroups, !page.shy, let from = active { page.groupID = from.groupID }
-        withAnimation(Motion.quick) {
+        // The panel goes at once: fading, it still held the page the stage
+        // was taking, and the two pulled it back and forth.
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) {
             peekTab = nil
             peekFrom = nil
         }
@@ -124,8 +131,10 @@ struct PeekLayer: View {
                     .transition(.opacity)
             }
             if let tab = browser.peekTab {
+                // Rises a little as it comes: a scale grew the frame round the
+                // page while the page itself, AppKit's, stayed its size.
                 PeekPanel(browser: browser, tab: tab)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .transition(.opacity.combined(with: .offset(y: 10)))
             }
         }
     }
@@ -143,7 +152,7 @@ struct PeekPanel: View {
                     // Solid underneath, as the page in the window is (see
                     // Stage): until the page draws its first frame, the
                     // panel was only its border over the page behind.
-                    Page(tab: tab)
+                    Page(tab: tab, corner: 12)
                         .background(Palette.ground)
                         .overlay {
                             if !tab.painted && tab.failure == nil {
@@ -155,7 +164,7 @@ struct PeekPanel: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .strokeBorder(Palette.hairline, lineWidth: 1)
                         )
-                        .shadow(color: .black.opacity(0.25), radius: 30, y: 10)
+                        .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
                     VStack(spacing: 8) {
                         Knob("xmark", help: "Close (esc)") { browser.closePeek() }
                         // ⌥ on it keeps the page beside this one, with Split
@@ -196,9 +205,10 @@ struct PeekPanel: View {
                     .background(hovering ? Palette.hover : Palette.ground, in: Circle())
                     .overlay(Circle().strokeBorder(Palette.hairline, lineWidth: 1))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(Press())
             .help(help)
             .onHover { hovering = $0 }
+            .animation(Motion.quick, value: hovering)
         }
     }
 }

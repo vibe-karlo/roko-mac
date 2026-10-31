@@ -38,6 +38,8 @@ final class Browser: NSObject, ObservableObject {
     /// puts it, and is then taken to its group or out of the groups' way.
     /// ⌘1–9, ⌃Tab and the extensions' tab indexes read this row, so it and
     /// what is on screen never disagree.
+    /// The tab that just came in behind (markArrival), while its row glows.
+    @Published private(set) var arrived: Tab.ID?
     @Published private(set) var tabs: [Tab] = [] {
         didSet {
             arrangeGroupedTabs()
@@ -461,20 +463,44 @@ final class Browser: NSObject, ObservableObject {
     }
     // The same words written back (the field does, as it appears) aren't
     // a Next: Return and the buttons ask for that themselves.
-    @Published var needle = "" {
-        didSet { if !resettingFind, oldValue != needle { look(forward: true) } }
+    // Kept in `find`, which only the find bar watches: a letter typed there
+    // redrew every tab row while it was the window's own.
+    let find = FindState()
+    var needle: String {
+        get { find.needle }
+        set {
+            let old = find.needle
+            find.needle = newValue
+            if !resettingFind, old != newValue { look(forward: true) }
+        }
     }
-    @Published var matchCase = false {
-        didSet { if !resettingFind, oldValue != matchCase { look(forward: true) } }
+    var matchCase: Bool {
+        get { find.matchCase }
+        set {
+            let old = find.matchCase
+            find.matchCase = newValue
+            if !resettingFind, old != newValue { look(forward: true) }
+        }
     }
-    @Published var wholeWords = false {
-        didSet { if !resettingFind, oldValue != wholeWords { look(forward: true) } }
+    var wholeWords: Bool {
+        get { find.wholeWords }
+        set {
+            let old = find.wholeWords
+            find.wholeWords = newValue
+            if !resettingFind, old != newValue { look(forward: true) }
+        }
     }
     /// Set when the page doesn't hold what was asked for.
-    @Published private(set) var missed = false
+    private(set) var missed: Bool {
+        get { find.missed }
+        set { find.missed = newValue }
+    }
     @Published private(set) var findFocus = 0
     /// The count and which match is current, as the page last answered.
-    @Published private(set) var findResult: PageFind.Result?
+    private(set) var findResult: PageFind.Result? {
+        get { find.result }
+        set { find.result = newValue }
+    }
 
     private let pageFind = PageFind()
     private struct FindSpec: Equatable {
@@ -1645,6 +1671,23 @@ final class Browser: NSObject, ObservableObject {
     /// while the rows are off: they are drawn as squares then.
     var listedPins: [Tab] { prefs.showsPinRows ? tabs.filter { $0.pin != nil && $0.listed } : [] }
 
+    /// The tab a menu is pinning or unpinning, while it moves: its row and
+    /// its square share one frame (View.flight in Side.swift).
+    @Published private(set) var flying: Tab.ID?
+
+    /// Pin, Unpin, or a square made a row, from a menu: the tab is marked as
+    /// moving and drawn once so, then moved, so it travels to its new place.
+    func fly(_ tab: Tab, _ change: @escaping () -> Void) {
+        guard !Motion.reduced else { return change() }
+        flying = tab.id
+        DispatchQueue.main.async {
+            withAnimation(Motion.glide) { change() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                if self.flying == tab.id { self.flying = nil }
+            }
+        }
+    }
+
     /// `listed`: as a row under the squares rather than as a square.
     func pin(_ tab: Tab, listed: Bool = false) {
         // Drawn again even when the tab stays where it is (see unpin).
@@ -1880,14 +1923,26 @@ final class Browser: NSObject, ObservableObject {
     /// Clicking the tab you are already on turns it into the address, short
     /// form, ready to be changed.
     @Published private(set) var editingTab: Tab.ID?
-    @Published var tabDraft = ""
+    // The draft and its list are kept in `tabEdit`, watched by the field and
+    // its list alone: each letter redrew every row while they were here.
+    let tabEdit = TabEditState()
+    var tabDraft: String {
+        get { tabEdit.draft }
+        set { tabEdit.draft = newValue }
+    }
     /// Set while that field is being used to name the tab rather than to go
     /// somewhere: the same field, the same keys, a different thing at the end.
     @Published private(set) var renamingTab = false
     /// What the field in the tab offers as you type, as ⌘L's does (#534),
     /// and the row the arrow keys are on.
-    @Published private(set) var tabOffers: [Suggestion] = []
-    @Published private(set) var tabPicked: Int?
+    private(set) var tabOffers: [Suggestion] {
+        get { tabEdit.offers }
+        set { tabEdit.offers = newValue }
+    }
+    private(set) var tabPicked: Int? {
+        get { tabEdit.picked }
+        set { tabEdit.picked = newValue }
+    }
     /// The address the edit began with: nothing is offered for that.
     private var tabOriginal = ""
 
@@ -3992,6 +4047,28 @@ final class Browser: NSObject, ObservableObject {
     /// a section you named is one you are keeping. The page on screen goes
     /// last, once an empty tab has taken its place: closed first, a
     /// neighbour would wake only to be closed.
+    /// The tabs Clear is taking, by their place from the top: each row
+    /// drops away a beat after the one above it (Swept, in Design.swift).
+    @Published private(set) var sweeping: [Tab.ID: Int] = [:]
+
+    /// Clear, from the line's own button: the rows are swept down the
+    /// column first, and closed as the last of them goes.
+    func sweepTabs() {
+        let going = tabs.filter { $0.pin == nil && !$0.bench && group(of: $0) == nil }
+        guard !going.isEmpty else { return }
+        guard sweeping.isEmpty else { return }
+        guard !Motion.reduced else { return clearTabs() }
+        sweeping = Dictionary(uniqueKeysWithValues: going.enumerated().map { ($1.id, $0) })
+        // Closed as the last row is nearly gone; what stays closes the gap.
+        let last = Double(min(going.count - 1, 12)) * 0.024
+        DispatchQueue.main.asyncAfter(deadline: .now() + last + 0.16) {
+            withAnimation(Motion.settle) { self.clearTabs() }
+            // Kept until the rows are gone: let go with them, a row on its
+            // way out was drawn whole again for its last frames.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.sweeping = [:] }
+        }
+    }
+
     func clearTabs() {
         let going = tabs.filter { $0.pin == nil && !$0.bench && group(of: $0) == nil }
         guard !going.isEmpty else { return }
@@ -4986,6 +5063,7 @@ final class Browser: NSObject, ObservableObject {
         if prefs.usesTabGroups, let source, !tab.shy, !tab.bench { tab.groupID = source.groupID }
         tabs.insert(tab, at: atEnd ? tabs.count : link ? placeForLink(from: source) : placeForNew())
         if link, !atEnd, !foreground { noteLink(tab, from: source) }
+        if !foreground { markArrival(tab) }
         if ready != nil {
             // Finished before it was asked for: its visit is counted now.
             if !tab.loading, let address = tab.address { recordVisit(address, of: tab) }
@@ -5681,14 +5759,10 @@ final class Browser: NSObject, ObservableObject {
         floating = tab.id
         tab.floating = true
         ownFloater()
-        let still = shot.flatMap { shot in
-            Float.still(
-                of: shot,
-                picture: (found["picture"] as? [NSNumber] ?? []).map(\.doubleValue),
-                page: (found["page"] as? [NSNumber] ?? []).map(\.doubleValue)
-            )
-        }
-        floater.lift(tab.web, still: still)
+        let picture = (found["picture"] as? [NSNumber] ?? []).map(\.doubleValue)
+        let page = (found["page"] as? [NSNumber] ?? []).map(\.doubleValue)
+        let still = shot.flatMap { Float.still(of: $0, picture: picture, page: page) }
+        floater.lift(tab.web, still: still, from: Float.onScreen(tab.web, picture: picture, size: page))
     }
 
     /// The page as it was when its video went out, for covering the tab with
@@ -5852,7 +5926,9 @@ final class Browser: NSObject, ObservableObject {
             .dropFirst()
             .sink { [weak self, weak tab] _ in
                 guard let self, let tab, tab.id == self.activeID else { return }
-                DispatchQueue.main.async { withAnimation(Motion.quick) { self.objectWillChange.send() } }
+                // Not in an animation: everything else that changed in the
+                // same pass would ease too. The grounds ease their own tint.
+                DispatchQueue.main.async { self.objectWillChange.send() }
             }
             .store(in: &bag)
 
@@ -6260,16 +6336,33 @@ final class Browser: NSObject, ObservableObject {
     /// The arrow keys walk the list, and walking off the top lets go of it.
     func walk(_ step: Int) {
         guard !offers.isEmpty else { return }
-        switch picked {
-        case nil:
-            picked = step > 0 ? 0 : offers.count - 1
-        case let here?:
-            let next = here + step
-            picked = (next < 0 || next >= offers.count) ? nil : next
+        // The mark glides to the next row (Omnibox.Row's `glide`); only the
+        // mark moves, the rows stay as they are.
+        withAnimation(Motion.quick) {
+            switch picked {
+            case nil:
+                picked = step > 0 ? 0 : offers.count - 1
+            case let here?:
+                let next = here + step
+                picked = (next < 0 || next >= offers.count) ? nil : next
+            }
         }
     }
 
     // MARK: - the address field
+
+    /// A tab that came in behind the one you're on (a ⌘-click, a link from
+    /// another app): its row glows softly for a moment, so the eye finds
+    /// where it went, and fades.
+    func markArrival(_ tab: Tab) {
+        guard !Motion.reduced, !Store.testing || Store.measuring else { return }
+        withAnimation(Motion.quick) { arrived = tab.id }
+        let id = tab.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            guard let self, self.arrived == id else { return }
+            withAnimation(.easeOut(duration: 0.5)) { self.arrived = nil }
+        }
+    }
 
     /// ⌘L. The current address comes up selected, so typing over it replaces it
     /// and Escape puts it back.
@@ -7834,10 +7927,46 @@ final class LauncherState: ObservableObject {
     @Published var siteOffer: SearchSite?
 }
 
+/// The find bar's own state (Browser.find): the words, the two options and
+/// what the page answered.
+@MainActor
+final class FindState: ObservableObject {
+    @Published var needle = ""
+    @Published var matchCase = false
+    @Published var wholeWords = false
+    @Published var missed = false
+    @Published var result: PageFind.Result?
+}
+
+/// The field in a tab (Browser.tabEdit): what is typed, the places offered
+/// for it, and the one walked to.
+@MainActor
+final class TabEditState: ObservableObject {
+    @Published var draft = ""
+    @Published var offers: [Suggestion] = []
+    @Published var picked: Int?
+}
+
 /// How far a swipe between spaces has gone (Browser.spaceSwipe).
 @MainActor
 final class SwipeState: ObservableObject {
     @Published var offset: CGFloat = 0
+    /// A space reached by a key more than one away (⌃3 from the first): the
+    /// page drawn beside the one leaving, rather than its neighbour.
+    @Published var target: Int?
+}
+
+/// The space on screen moved by a swipe between spaces: only this modifier
+/// watches the swipe, so each step moves the rows and works none of them out
+/// again (the column and the strip were redrawn whole for every trackpad
+/// event). Up and down for the strip, sideways for the column.
+struct SwipeOffset: ViewModifier {
+    @ObservedObject var state: SwipeState
+    var sideways = false
+
+    func body(content: Content) -> some View {
+        content.offset(x: sideways ? state.offset : 0, y: sideways ? 0 : state.offset)
+    }
 }
 
 /// Drawn again as a swipe moves, and nothing around it.

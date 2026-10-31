@@ -87,8 +87,12 @@ struct Page: View {
         .animation(Motion.quick, value: tab.failure)
         .animation(Motion.quick, value: tab.floating)
         .animation(Motion.quick, value: tab.reader)
-        .animation(.easeOut(duration: 0.2), value: tab.cover == nil)
-        .animation(.easeOut(duration: 0.16), value: tab.pull == nil)
+        .animation(Motion.reduced ? nil : .easeOut(duration: 0.2), value: tab.cover == nil)
+        .animation(Motion.reduced ? nil : .easeOut(duration: 0.16), value: tab.pull == nil)
+        // Another tab in front is another page, not this one changing: its
+        // error, cover or kind of page is there at once, with no fade from
+        // the last tab's (which flashed empty ground going to Settings).
+        .transaction(value: tab.id) { $0.disablesAnimations = true }
     }
 }
 

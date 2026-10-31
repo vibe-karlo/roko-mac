@@ -273,6 +273,11 @@ enum Motion {
         reduced ? nil : light ? .easeOut(duration: 0.16) : .spring(response: 0.30, dampingFraction: 0.86)
     }
 
+    /// A space sliding in sideways, by key, click or swipe.
+    static var slide: Animation? {
+        reduced ? nil : light ? .easeOut(duration: 0.14) : .easeOut(duration: 0.22)
+    }
+
     static var quick: Animation? {
         reduced ? nil : .easeOut(duration: 0.14)
     }
@@ -320,6 +325,56 @@ struct Logomark: Shape {
         path.addEllipse(in: CGRect(x: origin.x, y: origin.y, width: side, height: side))
         path.addEllipse(in: CGRect(x: origin.x + 244 * scale, y: origin.y + side / 2 - hole, width: hole * 2, height: hole * 2))
         return path
+    }
+}
+
+/// A button that answers the press: the mark sinks a little while held and
+/// springs back when let go, as a key does. Never on hover: a button that
+/// moves when the pointer only passes over it is one that jumps.
+struct Press: ButtonStyle {
+    var depth: CGFloat = 0.86
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !Motion.reduced ? depth : 1)
+            .animation(configuration.isPressed ? .easeOut(duration: 0.07) : Motion.settle,
+                       value: configuration.isPressed)
+    }
+}
+
+extension AnyTransition {
+    /// A tab's row coming and going: it grows in from its leading edge; going,
+    /// it is gone in a blink, before the rows sliding up into its place reach
+    /// it (fading at their pace, it lay over them, two titles in one row).
+    static func tabRow(scale: CGFloat, anchor: UnitPoint = .leading) -> AnyTransition {
+        .asymmetric(
+            insertion: .scale(scale: scale, anchor: anchor).combined(with: .opacity),
+            removal: .opacity.animation(Motion.reduced ? nil : .easeOut(duration: 0.07))
+        )
+    }
+}
+
+/// A row Clear is taking (Browser.sweepTabs): it drops a little and fades,
+/// each a beat after the one above it, so the tabs go down the column like a
+/// sweep rather than blinking out together. Moved while still there, not as
+/// they leave: the tabs close once the sweep has passed whether or not a
+/// frame of it was drawn.
+struct Swept: ViewModifier {
+    let index: Int?
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: index == nil ? 0 : 16)
+            .opacity(index == nil ? 1 : 0)
+            .animation(index.map { .easeIn(duration: 0.2).delay(Double(min($0, 12)) * 0.024) }, value: index)
+    }
+}
+
+extension View {
+    /// A symbol that changes (mute, play, copied, done) turns into the next
+    /// one rather than being swapped for it.
+    func symbolSwap() -> some View {
+        contentTransition(Motion.reduced ? .identity : .symbolEffect(.replace))
     }
 }
 

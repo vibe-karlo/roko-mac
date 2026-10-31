@@ -121,6 +121,9 @@ struct SideBar: View {
                     if prefs.sideAddressBar {
                         SideAddressBar(browser: browser)
                             .padding(.bottom, 10)
+                            // Its words are the new tab's at once: the
+                            // column's glide made them ghost into each other.
+                            .animation(nil, value: browser.activeID)
                     }
                 }
 
@@ -154,7 +157,8 @@ struct SideBar: View {
         .onAppear { SpaceSwipe.shared.start(for: browser) }
         .background {
             ZStack {
-                landing ? greys.hover : onFrame ? SiteTint.ground(browser.frameTint) : Palette.ground
+                (landing ? greys.hover : onFrame ? SiteTint.ground(browser.frameTint) : Palette.ground)
+                    .animation(Motion.quick, value: browser.frameTint)
                 if prefs.splitView {
                     SplitDropZone(browser: browser, tab: nil, kind: .strip)
                 }
@@ -172,6 +176,11 @@ struct SideBar: View {
         .animation(Motion.glide, value: browser.activeID)
         .animation(Motion.glide, value: browser.editingTab)
         .animation(Motion.settle, value: browser.tabs.map(\.id))
+        // A folder opened or closed, a split made or taken apart: the rows
+        // come and go in their own transition and the rest slide, where they
+        // used to pop and jump.
+        .animation(Motion.settle, value: browser.tabGroups.map(\.collapsed))
+        .animation(Motion.settle, value: browser.splits.map(\.tabs))
         .animation(Motion.settle, value: browser.pinnedCount)
         // The last square made the first row changes nothing in the row's
         // order; only how many of each there are.
@@ -220,21 +229,26 @@ struct SideBar: View {
     private var pages: some View {
         let width = prefs.columnWidth
         let at = spaceAt
-        return Swiped(state: browser.swipe) { swipe in
-        ZStack(alignment: .topLeading) {
+        return ZStack(alignment: .topLeading) {
+            // Moved by the swipe, not worked out again at each step of it.
             page(at, pill: pill)
-                .offset(x: swipe)
+                .modifier(SwipeOffset(state: browser.swipe, sideways: true))
             // Only while the fingers are bringing one in: the one they are
-            // bringing, a page's width away.
-            if swipe > 0, at > 0 {
-                page(at - 1, pill: before)
-                    .offset(x: swipe - width)
+            // bringing, a page's width away. A key's jump past the next space
+            // draws the one it goes to.
+            Swiped(state: browser.swipe) { swipe in
+                // Slid in whole: no fade of its own on top of the slide.
+                if swipe > 0, at > 0 {
+                    page(browser.swipe.target ?? at - 1, pill: before)
+                        .offset(x: swipe - width)
+                        .transition(.identity)
+                }
+                if swipe < 0, at < browser.spaces.count {
+                    page(browser.swipe.target ?? at + 1, pill: after)
+                        .offset(x: swipe + width)
+                        .transition(.identity)
+                }
             }
-            if swipe < 0, at < browser.spaces.count {
-                page(at + 1, pill: after)
-                    .offset(x: swipe + width)
-            }
-        }
         }
         // The pages are the column's whole width, each with its own margin.
         .padding(.horizontal, -10)
@@ -277,53 +291,55 @@ struct SideBar: View {
                     // did, every row of it each time the pointer crossed a
                     // row (Bench "hoversweep": 22 rows a crossing, not 2).
                     let needed = rowsHeight
-                    Group {
-                        if fits {
-                            rows.onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                                room.drawn = $0
-                                refit()
-                            }
-                        } else {
-                            ScrollViewReader { proxy in
-                                // The scroll view reaches into the margin on
-                                // the right and the rows keep it inside, so the
-                                // system's bar lands in the margin beside them
-                                // rather than over the cross on the tab under the
-                                // pointer. The column's edge lies over that margin
-                                // and answers first, so the bar never fights the
-                                // resize; the wheel and the trackpad still scroll.
-                                ScrollView(.vertical) {
-                                    rows.padding(.trailing, 10)
-                                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                                            room.drawn = $0
-                                            refit()
-                                        }
+                    ScrollViewReader { proxy in
+                        // One scroll view, fitting or not: the rows were
+                        // built again whole, every one of them, the moment
+                        // a tab opened or closed across the line where the
+                        // column starts to scroll, and the row coming or
+                        // going lost its slide. While they fit it holds
+                        // still, draws past its edge as the plain stack
+                        // did, and is only as tall as the rows, so the
+                        // space under them is still the window's to be
+                        // dragged by.
+                        //
+                        // The scroll view reaches into the margin on the
+                        // right and the rows keep it inside, so the system's
+                        // bar lands in the margin beside them rather than
+                        // over the cross on the tab under the pointer. The
+                        // column's edge lies over that margin and answers
+                        // first, so the bar never fights the resize; the
+                        // wheel and the trackpad still scroll.
+                        ScrollView(.vertical) {
+                            rows.padding(.trailing, 10)
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                                    room.drawn = $0
+                                    refit()
                                 }
-                                .padding(.trailing, -10)
-                                // The tab you go to is the tab you see — ⌘1–⌘9,
-                                // ⇧⌘], a link opening beside the one on screen.
-                                .onChange(of: browser.activeID) { _, id in
-                                    guard let id else { return }
-                                    let representative = browser.activeSplit?.left ?? id
-                                    // Without the glide on a test run: a hidden
-                                    // probe's window draws no frames, and the
-                                    // scroll stopped where its first one left it.
-                                    withAnimation(Store.testing ? nil : Motion.glide) { proxy.scrollTo(representative) }
-                                }
-                                // A turn of the run loop later, as the row across
-                                // the top does it (TabBar.reveal): the folded
-                                // column comes out mid-animation, and asked at
-                                // once, before the rows had their height, the
-                                // scroll could be dropped and the tab you were on
-                                // left out of sight.
-                                .onAppear {
-                                    guard let id = browser.activeID else { return }
-                                    DispatchQueue.main.async {
-                                        proxy.scrollTo(browser.activeSplit?.left ?? id, anchor: .center)
-                                    }
-                                }
-                            }
                         }
+                        .scrollDisabled(fits)
+                        .scrollClipDisabled(fits)
+                        .scrollIndicators(fits ? .hidden : .automatic)
+                        .frame(height: fits && room.drawn > 0 ? room.drawn : nil, alignment: .top)
+                        .padding(.trailing, -10)
+                        // The tab you go to is the tab you see — ⌘1–⌘9,
+                        // ⇧⌘], a link opening beside the one on screen.
+                        .onChange(of: browser.activeID) { _, id in
+                            guard let id, !fits else { return }
+                            let representative = browser.activeSplit?.left ?? id
+                            // Without the glide on a test run: a hidden
+                            // probe's window draws no frames, and the
+                            // scroll stopped where its first one left it.
+                            withAnimation(Store.testing ? nil : Motion.glide) { proxy.scrollTo(representative) }
+                        }
+                        // A turn of the run loop later, as the row across
+                        // the top does it (TabBar.reveal): the folded
+                        // column comes out mid-animation, and asked at
+                        // once, before the rows had their height, the
+                        // scroll could be dropped and the tab you were on
+                        // left out of sight. Asked again when the rows stop
+                        // fitting, for the same reason.
+                        .onAppear { reveal(proxy) }
+                        .onChange(of: fits) { _, fits in if !fits { reveal(proxy) } }
                     }
                     // The whole room under the pins, and never more, to be
                     // measured: a minimum of nothing, so a plain stack taller
@@ -360,6 +376,13 @@ struct SideBar: View {
         }
         .padding(.horizontal, 10)
         .frame(width: prefs.columnWidth, alignment: .topLeading)
+    }
+
+    private func reveal(_ proxy: ScrollViewProxy) {
+        guard let id = browser.activeID else { return }
+        DispatchQueue.main.async {
+            proxy.scrollTo(browser.activeSplit?.left ?? id, anchor: .center)
+        }
     }
 
     private func refit() {
@@ -653,7 +676,7 @@ struct SideBar: View {
             // Under the groups: Clear keeps them, as it keeps the pins, so
             // everything above the line is what stays.
             if showsLine(kept: keptCount, listed: browser.listedPins.count, loose: loose.count) {
-                KeepLine(clears: !loose.isEmpty) { browser.clearTabs() }
+                KeepLine(clears: !loose.isEmpty) { browser.sweepTabs() }
             }
             let ghost: Int? = if case .loose(let at)? = crossing?.target { at } else { nil }
             // In a stack of their own, measured, for where a pin carried
@@ -925,6 +948,7 @@ private struct SideFoot: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.bottom, 8)
+            .animation(Motion.settle, value: FetchDoor.shows(fetches, prefs))
         } else {
             HStack(spacing: 2) {
                 if Profiles.shared.several { ProfileBadge(browser: browser) }
@@ -937,6 +961,9 @@ private struct SideFoot: View {
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
+            // The downloads door comes and goes in its own transition; with
+            // this the doors beside it make room rather than jumping.
+            .animation(Motion.settle, value: FetchDoor.shows(fetches, prefs))
         }
     }
 
@@ -1076,6 +1103,9 @@ private struct PinSquare: View {
         .contextMenu { TabMenu(browser: browser, tab: tab, close: { browser.close(tab) }) }
         .help(tab.label)
         .animation(Motion.quick, value: hovering)
+        // The ring and the mark trade places softly, as a row's do.
+        .animation(Motion.quick, value: tab.loading)
+        .flight(of: tab, browser: browser, in: pill)
         .transition(.scale(scale: 0.8).combined(with: .opacity))
     }
 }
@@ -1119,7 +1149,7 @@ private struct SideRow: View {
         HStack(spacing: 8) {
             HStack(spacing: 8) {
                 if editing {
-                    TabAddressField(browser: browser)
+                    TabAddressField(browser: browser, edit: browser.tabEdit)
                         .frame(height: 16)
                 } else {
                     if prefs.glyph == .icons, !tab.isBlank {
@@ -1269,7 +1299,9 @@ private struct SideRow: View {
             shake = 0
             withAnimation(.easeOut(duration: 0.5)) { shake = 1 }
         }
-        .transition(.scale(scale: 0.94, anchor: .leading).combined(with: .opacity))
+        .flight(of: tab, browser: browser, in: pill)
+        .modifier(Swept(index: browser.sweeping[tab.id]))
+        .transition(.tabRow(scale: 0.94))
     }
 
     private func hover(_ over: Bool) { hovering = over }
@@ -1290,7 +1322,7 @@ private struct SideRow: View {
         } else if browser.selectedTabIDs.contains(tab.id) {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(greys.wash)
-        } else if hovering {
+        } else if hovering || browser.arrived == tab.id {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(greys.hover)
         }
@@ -1402,11 +1434,12 @@ struct Speaker: View {
             Image(systemName: tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                 .font(.system(size: 8))
                 .foregroundStyle(Palette.muted)
+                .symbolSwap()
                 .frame(width: 15, height: 15)
                 .background(Palette.ink.opacity(hovering ? 0.07 : 0), in: Circle())
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Press())
         .onHover { hovering = $0 }
         .help(tab.muted ? "Unmute Tab" : "Mute Tab")
         .animation(Motion.quick, value: hovering)
@@ -1436,6 +1469,7 @@ struct Door: View {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(on ? Palette.ink : (hovering ? Palette.ink.opacity(0.7) : Palette.muted))
+                .symbolSwap()
                 .frame(width: 26, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -1443,7 +1477,7 @@ struct Door: View {
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Press(depth: 0.9))
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.35).onEnded { _ in
                 guard let menu = held?() else { return }
@@ -1590,6 +1624,23 @@ private struct JoinMark: View {
                     .fill(greys.wash)
                     .allowsHitTesting(false)
             }
+        }
+    }
+}
+
+private extension View {
+    /// A tab pinned or unpinned from a menu: its row and its square are one
+    /// frame for the move, so the row folds into its square (or the square
+    /// opens out into a row) where it lands, rather than one blinking out
+    /// and the other in. Only on the tab moving, and only while it moves:
+    /// left on every row, even matching nothing, it threw off a pinned row
+    /// carried up into the squares.
+    @ViewBuilder
+    func flight(of tab: Tab, browser: Browser, in space: Namespace.ID) -> some View {
+        if browser.flying == tab.id {
+            matchedGeometryEffect(id: tab.id, in: space)
+        } else {
+            self
         }
     }
 }

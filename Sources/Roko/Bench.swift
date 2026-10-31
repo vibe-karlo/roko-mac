@@ -2925,7 +2925,7 @@ final class Bench {
             guard let window = browser.window ?? Links.window, let frame = window.contentView?.superview,
                   let path = request["path"] as? String, !path.isEmpty
             else { answer(["error": "film needs something to do and a path"]); return }
-            if request["action"] as? String == "select", find(request, in: browser) == nil {
+            if ["select", "pin", "unpin"].contains(request["action"] as? String ?? ""), find(request, in: browser) == nil {
                 answer(missing(request)); return
             }
             let count = min(60, max(1, request["frames"] as? Int ?? 14))
@@ -2974,6 +2974,9 @@ final class Bench {
             case "unpeek": browser.peek(false)
             case "fold": browser.toggleFold()
             case "select": if let tab = find(request, in: browser) { browser.select(tab) }
+            case "clear": browser.sweepTabs()
+            case "pin": if let tab = find(request, in: browser) { browser.fly(tab) { browser.pin(tab) } }
+            case "unpin": if let tab = find(request, in: browser) { browser.fly(tab) { browser.unpin(tab) } }
             case "swipe":
                 // Two fingers along the column, a step every frame for the
                 // first eight, then let go: the next space coming in, as a

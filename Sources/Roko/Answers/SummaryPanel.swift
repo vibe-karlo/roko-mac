@@ -67,7 +67,10 @@ struct SummaryPanel: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
                 .padding(.bottom, 14)
-            if model.isWorking { progress.padding(.horizontal, 20).padding(.bottom, 10) }
+            if model.isWorking {
+                progress.padding(.horizontal, 20).padding(.bottom, 10)
+                    .transition(.opacity)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if case .failed(let why) = model.phase {
@@ -76,7 +79,7 @@ struct SummaryPanel: View {
                             .foregroundStyle(Theme.secondaryInk)
                             .fixedSize(horizontal: false, vertical: true)
                     } else if !model.text.isEmpty {
-                        MarkdownText(markdown: model.text, isStreaming: model.phase == .writing, anchor: "summary")
+                        PacedMarkdown(text: model.text, streaming: model.phase == .writing)
                     }
                     footer
                 }
@@ -90,6 +93,9 @@ struct SummaryPanel: View {
         .overlay(shape.strokeBorder(Theme.edge, lineWidth: 1))
         // Cast from above, tight: lifted off the page, not floating on a cloud.
         .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+        // The progress line going once words come: it fades, and the words
+        // below rise into its place rather than jumping.
+        .animation(Motion.settle, value: model.isWorking)
         .onExitCommand { browser.closeSummary() }
     }
 
@@ -147,6 +153,61 @@ struct SummaryPanel: View {
                 .foregroundStyle(Theme.faintInk)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
+        }
+    }
+}
+
+/// The summary as it is shown: catching up with what the model has written at
+/// an even pace, a few letters a frame, rather than in the bursts it arrives
+/// in. Streamed straight through, a line sat still, then jumped by half a
+/// sentence and pushed everything under it down at once, twenty times a
+/// second. The further behind it is, the faster it goes, so it is never more
+/// than a moment behind; a summary already written shows whole at once.
+private struct PacedMarkdown: View {
+    let text: String
+    let streaming: Bool
+    @State private var shown: String?
+    /// What has been written so far, as the loop below reads it: the view's
+    /// own `text` is the one it was made with.
+    @State private var written = ""
+    @State private var pacing: Task<Void, Never>?
+
+    var body: some View {
+        let shown = shown ?? text
+        MarkdownText(markdown: shown, isStreaming: streaming || shown.count < text.count, anchor: "summary")
+            .onChange(of: text, initial: true) { _, text in pace(to: text) }
+            .onDisappear { pacing?.cancel() }
+    }
+
+    private func pace(to text: String) {
+        written = text
+        // Nothing to pace: written before it opened, or motion kept still.
+        guard streaming || shown != nil, !Motion.reduced else {
+            shown = nil
+            return
+        }
+        let now = shown ?? ""
+        // The model wrote its words over (Apple's do, now and then): taken as they are.
+        guard text.hasPrefix(now) else {
+            shown = text
+            return
+        }
+        if shown == nil { shown = "" }
+        guard pacing == nil else { return }
+        pacing = Task { @MainActor in
+            let frame: Duration = Motion.light ? .milliseconds(50) : .milliseconds(33)
+            while !Task.isCancelled, let here = shown, here.count < written.count {
+                let target = written
+                guard target.hasPrefix(here) else { shown = target; break }
+                let behind = target.count - here.count
+                var end = target.index(target.startIndex, offsetBy: here.count + max(2, behind / 7))
+                // Whole words where one ends close by: half a word drawn, then
+                // the rest, made the line flicker as it wrapped.
+                if let space = target[end...].prefix(10).firstIndex(where: \.isWhitespace) { end = space }
+                shown = String(target[..<end])
+                try? await Task.sleep(for: frame)
+            }
+            pacing = nil
         }
     }
 }

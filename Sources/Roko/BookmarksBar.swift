@@ -56,7 +56,7 @@ struct BookmarksBar: View {
                 withAnimation(Motion.glide) { browser.prefs.bookmarksBar = false }
             }
         }
-        .background(onFrame ? SiteTint.ground(browser.frameTint) : Palette.ground)
+        .background((onFrame ? SiteTint.ground(browser.frameTint) : Palette.ground).animation(Motion.quick, value: browser.frameTint))
         .overlay(alignment: .bottom) {
             if !onFrame { Rectangle().fill(Palette.hairline).frame(height: 1) }
         }

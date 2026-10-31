@@ -266,6 +266,55 @@ struct ReadingFill: View {
     }
 }
 
+/// How far a page has loaded, while it loads. Its own object for the same
+/// reason as Reading: WebKit says so ten times a second while a page comes
+/// in, and as part of the tab every row, pill and stage watching it ran
+/// again each time, for a number nothing drew.
+@MainActor
+final class Loading: ObservableObject {
+    @Published var fraction: Double = 0
+    @Published var on = false
+}
+
+/// The page coming in, in the address bar of the tab you're on: a grey that
+/// grows from the left as it loads, runs to the end when it is in, and fades,
+/// as the reading fill grows in the tab. Nothing while nothing loads.
+struct LoadingFill: View {
+    @ObservedObject var loading: Loading
+    @State private var shown: Double = 0
+    @State private var visible = false
+
+    var body: some View {
+        GeometryReader { geo in
+            Rectangle()
+                .fill(Palette.ink.opacity(0.06))
+                .frame(width: geo.size.width * shown)
+                .opacity(visible ? 1 : 0)
+        }
+        .allowsHitTesting(false)
+        .onAppear { follow(loading.on, loading.fraction) }
+        .onChange(of: loading.fraction) { _, value in follow(loading.on, value) }
+        .onChange(of: loading.on) { _, on in follow(on, loading.fraction) }
+    }
+
+    private func follow(_ on: Bool, _ fraction: Double) {
+        if Motion.reduced { visible = false; return }
+        if on {
+            // A new load starts from the left at once, never sliding back.
+            let target = max(0.08, fraction)
+            if !visible || target < shown {
+                var still = Transaction(); still.disablesAnimations = true
+                withTransaction(still) { shown = target; visible = true }
+            } else {
+                withAnimation(.smooth(duration: 0.35)) { shown = target }
+            }
+        } else if visible {
+            withAnimation(.smooth(duration: 0.2)) { shown = 1 }
+            withAnimation(.easeOut(duration: 0.3).delay(0.18)) { visible = false }
+        }
+    }
+}
+
 @MainActor
 final class Tab: ObservableObject, Identifiable {
     let id = UUID()
@@ -373,7 +422,9 @@ final class Tab: ObservableObject, Identifiable {
         address = url
         failure = nil
     }
-    @Published private(set) var progress: Double = 0
+    /// How far the page has loaded (Loading): not published here.
+    let load = Loading()
+    var progress: Double { load.fraction }
     @Published private(set) var loading = false
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
@@ -814,7 +865,7 @@ final class Tab: ObservableObject, Identifiable {
             cover = nil
             failure = nil
             loading = false
-            progress = 0
+            load.fraction = 0
             reader = false
             behind = nil
             trail = []
@@ -974,10 +1025,13 @@ final class Tab: ObservableObject, Identifiable {
                 }
             },
             web.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.progress = self?.built?.estimatedProgress ?? 0 }
+                MainActor.assumeIsolated { self?.load.fraction = self?.built?.estimatedProgress ?? 0 }
             },
             web.observe(\.isLoading, options: [.new]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.loading = self?.built?.isLoading ?? false }
+                MainActor.assumeIsolated {
+                    self?.loading = self?.built?.isLoading ?? false
+                    if let self, self.load.on != self.loading { self.load.on = self.loading }
+                }
             },
             web.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
                 MainActor.assumeIsolated { self?.steps() }

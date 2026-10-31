@@ -58,10 +58,11 @@ struct SideAddressBar: View {
                         Image(systemName: copied ? "checkmark" : "link")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(copied ? Palette.ink : Palette.muted)
+                            .symbolSwap()
                             .frame(width: 22, height: 24)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(Press())
                     .help("Copy link (⇧⌘C)")
                     .accessibilityLabel("Copy link")
                     .transition(.opacity)
@@ -74,7 +75,7 @@ struct SideAddressBar: View {
                             .frame(width: 22, height: 24)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(Press())
                     .help(summaryOpen ? "Close the summary (⇧⌘Y)" : "Summarize this page (⇧⌘Y)")
                     .accessibilityLabel(summaryOpen ? "Close the summary" : "Summarize this page")
                     .transition(.opacity)
@@ -85,7 +86,14 @@ struct SideAddressBar: View {
         .padding(.trailing, 4)
         .frame(height: SideAddressBar.height)
         .animation(Motion.quick, value: summaryOpen)
-        .background(shape.fill(hovering ? greys.wash : greys.hover))
+        .background {
+            ZStack(alignment: .leading) {
+                shape.fill(hovering ? greys.wash : greys.hover)
+                // The page coming in, filling from the left (Tab.Loading).
+                if let tab = browser.active { LoadingFill(loading: tab.load).id(tab.id) }
+            }
+            .clipShape(shape)
+        }
         .contentShape(shape)
         .onHover { hovering = $0 }
         .animation(Motion.quick, value: hovering)

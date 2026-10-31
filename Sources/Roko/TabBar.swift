@@ -9,13 +9,6 @@ struct TabBar: View {
     private var lights: CGFloat { browser.fullScreen ? 12 : Metrics.lights }
 
     @ObservedObject var browser: Browser
-    /// A swipe between spaces, as it moves (Browser.swipe).
-    @ObservedObject private var swipe: SwipeState
-
-    init(browser: Browser) {
-        self.browser = browser
-        swipe = browser.swipe
-    }
 
     @Namespace private var pill
     /// The neighbouring spaces' own grey, apart from this one's.
@@ -72,7 +65,9 @@ struct TabBar: View {
                         if making {
                             NewSpaceCard(browser: browser, inline: true)
                                 .fixedSize()
-                                .offset(y: browser.spaceSwipe)
+                                // Moved by the swipe without the strip being
+                                // worked out again for every step of it.
+                                .modifier(SwipeOffset(state: browser.swipe))
                         } else {
                             ScrollViewReader { reader in
                                 ScrollView(.horizontal, showsIndicators: false) {
@@ -128,15 +123,23 @@ struct TabBar: View {
                                 .onChange(of: overflowing(in: geo.size.width)) { _, _ in reveal(reader, in: geo.size.width) }
                                 .onChange(of: browser.activeID) { _, _ in reveal(reader, in: geo.size.width, gliding: true) }
                             }
-                                .offset(y: browser.spaceSwipe)
+                                // Moved by the swipe without the strip being
+                                // worked out again for every step of it.
+                                .modifier(SwipeOffset(state: browser.swipe))
                         }
-                        if browser.spaceSwipe > 0, spaceAt > 0 {
-                            page(spaceAt - 1, in: geo.size.width, pill: above)
-                                .offset(y: browser.spaceSwipe - Metrics.strip)
-                        }
-                        if browser.spaceSwipe < 0, spaceAt < browser.spaces.count {
-                            page(spaceAt + 1, in: geo.size.width, pill: below)
-                                .offset(y: browser.spaceSwipe + Metrics.strip)
+                        // The neighbour coming in: drawn only while a swipe is
+                        // on, and only it, by what watches the swipe.
+                        Swiped(state: browser.swipe) { swipe in
+                            if swipe > 0, spaceAt > 0 {
+                                page(browser.swipe.target ?? spaceAt - 1, in: geo.size.width, pill: above)
+                                    .offset(y: swipe - Metrics.strip)
+                                    .transition(.identity)
+                            }
+                            if swipe < 0, spaceAt < browser.spaces.count {
+                                page(browser.swipe.target ?? spaceAt + 1, in: geo.size.width, pill: below)
+                                    .offset(y: swipe + Metrics.strip)
+                                    .transition(.identity)
+                            }
                         }
                     }
                     .frame(width: making ? min(540, room(in: geo.size.width)) : run(in: geo.size.width), height: Metrics.strip, alignment: .leading)
@@ -161,10 +164,11 @@ struct TabBar: View {
                     }
                     .buttonStyle(.plain)
                     .onHover { plussed = $0 }
+                    // Comes up as the pointer nears, without moving: a
+                    // button that grows on hover is one that jumps.
                     .opacity(nearby ? 1 : 0)
-                    .scaleEffect(nearby ? 1 : 0.7, anchor: .leading)
                     .allowsHitTesting(nearby)
-                    .animation(Motion.settle, value: nearby)
+                    .animation(Motion.quick, value: nearby)
 
                     Spacer(minLength: 0)
 
@@ -218,6 +222,7 @@ struct TabBar: View {
         // and the tabs appeared to jump aside.
         .animation(Motion.glide, value: browser.editingTab)
         .animation(Motion.settle, value: browser.tabs.map(\.id))
+        .animation(Motion.settle, value: browser.splits.map(\.tabs))
     }
 
     // MARK: - the spaces, one above the other
@@ -744,7 +749,7 @@ private struct TabPill: View {
             withAnimation(.easeOut(duration: 0.5)) { shake = 1 }
         }
         // Arriving and leaving from the strip rather than from nowhere.
-        .transition(.scale(scale: 0.9, anchor: .leading).combined(with: .opacity))
+        .transition(.tabRow(scale: 0.9))
     }
 
     @ViewBuilder
@@ -784,7 +789,7 @@ private struct TabPill: View {
     private var titled: some View {
         HStack(spacing: 6) {
             if editing {
-                TabAddressField(browser: browser)
+                TabAddressField(browser: browser, edit: browser.tabEdit)
                     .frame(height: 16)
             } else {
                 if prefs.glyph == .icons, !tab.isBlank {
@@ -976,6 +981,9 @@ struct Carried: ViewModifier {
     @State private var reordered = false
     /// Over the middle of this tab: let go, and the two make a split.
     @State private var joining: Tab?
+    /// Picked up: a touch larger, with a short shadow under it, eased in once
+    /// as the hand takes it (the travel itself is never animated).
+    @State private var lifted = false
 
     /// Where the row would go, and the tab it is over the middle of. Without
     /// splits a row swaps at half a place, as ever; with them the middle of
@@ -1015,7 +1023,8 @@ struct Carried: ViewModifier {
             // drifted back each time it passed one. Only the others glide.
             .transaction { if held { $0.animation = nil } }
             .zIndex(held ? 1 : 0)
-            .shadow(color: .black.opacity(held && !carried ? 0.14 : 0), radius: 12, y: 4)
+            .scaleEffect(lifted && !carried ? 1.02 : 1)
+            .shadow(color: .black.opacity(lifted && !carried ? 0.12 : 0), radius: 6, y: 3)
             .opacity(held && (faded || carried) ? 0.4 : 1)
             .onReceive(TabDrag.shared.$carrying) { id in
                 let now = id != nil && id == tab?.id
@@ -1027,6 +1036,7 @@ struct Carried: ViewModifier {
                         if !held {
                             held = true
                             from = index
+                            withAnimation(Motion.quick) { lifted = true }
                         }
                         travel = vertical ? value.translation.height : value.translation.width
                         // Asked every move, so the block it left lets go
@@ -1083,7 +1093,7 @@ struct Carried: ViewModifier {
                                         else if source.id == tab.id { onDrop?(value.location) }
                                     }
                                 case .cancelled:
-                                    if reordered { move(from) }
+                                    if reordered { withAnimation(Motion.settle) { move(from) } }
                                 }
                             }
                         } else if land?(value.location) != true, outside?() != true {
@@ -1093,6 +1103,7 @@ struct Carried: ViewModifier {
                         setJoining(nil)
                         withAnimation(Motion.settle) {
                             held = false
+                            lifted = false
                             travel = 0
                             reordered = false
                         }
@@ -1102,10 +1113,14 @@ struct Carried: ViewModifier {
                 guard id == tab?.id, held else { return }
                 _ = land?(nil)
                 setJoining(nil)
-                if reordered { move(from) }
-                held = false
-                travel = 0
-                reordered = false
+                // Back to where it came from, as a drop settles: not a snap.
+                withAnimation(Motion.settle) {
+                    if reordered { move(from) }
+                    held = false
+                    lifted = false
+                    travel = 0
+                    reordered = false
+                }
             }
     }
 }
@@ -1122,6 +1137,8 @@ extension Carried {
 
 struct TabAddressField: NSViewRepresentable {
     @ObservedObject var browser: Browser
+    /// The draft, watched here rather than on the browser (Browser.tabEdit).
+    @ObservedObject var edit: TabEditState
 
     func makeCoordinator() -> Coordinator { Coordinator(browser: browser) }
 
@@ -1311,15 +1328,15 @@ struct TabMenu: View {
         }
         let rows = browser.prefs.showsPinRows
         if tab.pin == nil {
-            Button("Pin") { browser.pin(tab) }
+            Button("Pin") { browser.fly(tab) { browser.pin(tab) } }
                 .disabled(!tab.isWeb || tab.shy)
             if rows {
-                Button("Pin as Row") { browser.pin(tab, listed: true) }
+                Button("Pin as Row") { browser.fly(tab) { browser.pin(tab, listed: true) } }
                     .disabled(!tab.isWeb || tab.shy)
             }
         } else {
             if rows {
-                Button(tab.listed ? "Show as Square" : "Show as Row") { browser.setListed(tab, !tab.listed) }
+                Button(tab.listed ? "Show as Square" : "Show as Row") { browser.fly(tab) { browser.setListed(tab, !tab.listed) } }
             }
             // The way home a square's double-click is (Browser.goHome), for
             // every pin, while it has wandered; or where it has wandered to
@@ -1338,7 +1355,7 @@ struct TabMenu: View {
                     if tab.everywhere { browser.keepHere(tab) } else { browser.shareEverywhere(tab) }
                 }
             }
-            Button("Unpin") { browser.unpin(tab) }
+            Button("Unpin") { browser.fly(tab) { browser.unpin(tab) } }
         }
         // A shared pin is in every space already: nowhere to move it.
         if browser.prefs.usesSpaces, !tab.bench, !tab.everywhere,

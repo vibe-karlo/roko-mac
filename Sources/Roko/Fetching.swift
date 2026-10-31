@@ -636,10 +636,11 @@ struct FetchDoor: View {
                             .foregroundStyle(hovering ? Palette.ink.opacity(0.7) : Palette.muted)
                             .transition(.opacity)
                     } else if fetches.done {
+                        // In: the arrow drops into place, a small landing.
                         Image(systemName: "arrow.down")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Palette.ink.opacity(0.75))
-                            .transition(.opacity)
+                            .transition(Motion.reduced ? .opacity : .opacity.combined(with: .offset(y: -6)))
                     } else if let fraction = fetches.fraction {
                         Circle()
                             .stroke(Palette.muted.opacity(0.3), lineWidth: 1.5)
@@ -661,11 +662,11 @@ struct FetchDoor: View {
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(Press(depth: 0.9))
             .onHover { hovering = $0 }
             .help("Downloads (⇧⌘J)")
             .transition(.scale(scale: 0.6).combined(with: .opacity))
-            .animation(Motion.quick, value: fetches.done)
+            .animation(fetches.done ? Motion.settle : Motion.quick, value: fetches.done)
             .animation(Motion.quick, value: fetches.showing)
             .animation(Motion.quick, value: hovering)
         }

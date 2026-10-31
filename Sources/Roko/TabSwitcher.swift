@@ -435,7 +435,8 @@ struct TabSwitcherOverlay: View {
                         x: CGFloat(index % 5) * (width + 8),
                         y: CGFloat(index / 5) * (cardHeight + 8)
                     )
-                    .animation(Motion.glide, value: switcher.selectedID)
+                    // Keys come faster than a spring settles: it follows them.
+                    .animation(Motion.quick, value: switcher.selectedID)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -624,7 +625,7 @@ struct TabSwitcherOverlay: View {
             .padding(6)
             .frame(width: width, alignment: .topLeading)
             .background(selected ? Palette.faint : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .animation(Motion.glide, value: selected)
+            .animation(Motion.quick, value: selected)
             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)

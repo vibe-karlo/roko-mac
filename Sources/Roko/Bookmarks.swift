@@ -816,7 +816,9 @@ struct BookmarkOutline: View {
     }
 
     private func toggle(_ id: Bookmark.ID) {
-        if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+        withAnimation(Motion.settle) {
+            if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+        }
     }
 
     /// A folder can't go above, below or into anything inside itself.

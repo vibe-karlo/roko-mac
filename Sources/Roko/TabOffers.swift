@@ -25,7 +25,7 @@ enum TabOffersPanel {
         anchor = field
         let key = ObjectIdentifier(browser)
         guard watching[key] == nil else { return }
-        watching[key] = browser.$tabOffers
+        watching[key] = browser.tabEdit.$offers
             .map(\.isEmpty)
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
@@ -61,7 +61,7 @@ enum TabOffersPanel {
         let spot = window.convertToScreen(field.convert(field.bounds, to: nil))
         // As wide as the field and the card's margin either side, within reason.
         let width = min(max(spot.width + 24, 320), 460)
-        let host = Host(rootView: AnyView(TabOffersList(browser: browser).frame(width: width)))
+        let host = Host(rootView: AnyView(TabOffersList(browser: browser, edit: browser.tabEdit).frame(width: width)))
         let size = host.fittingSize
         host.frame = NSRect(origin: .zero, size: size)
         let panel = Panel(contentRect: host.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -127,12 +127,13 @@ enum TabOffersPanel {
 
 /// The list itself, drawn as ⌘L's is.
 private struct TabOffersList: View {
-    @ObservedObject var browser: Browser
+    let browser: Browser
+    @ObservedObject var edit: TabEditState
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(Array(browser.tabOffers.enumerated()), id: \.element.id) { index, offer in
-                Omnibox.Row(offer: offer, picked: browser.tabPicked == index)
+            ForEach(Array(edit.offers.enumerated()), id: \.element.id) { index, offer in
+                Omnibox.Row(offer: offer, picked: edit.picked == index)
                     .contentShape(Rectangle())
                     .onTapGesture { browser.takeTabOffer(offer) }
             }

@@ -210,7 +210,7 @@ struct IconTile: View {
         .animation(Motion.quick, value: tab.loading)
         .animation(Motion.quick, value: speaker)
         .animation(Motion.quick, value: tab.recording)
-        .transition(.scale(scale: 0.9).combined(with: .opacity))
+        .transition(.tabRow(scale: 0.9, anchor: .center))
     }
 
     @ViewBuilder
@@ -235,6 +235,7 @@ private struct CornerSpeaker: View {
     var body: some View {
         Button(action: tab.toggleMute) {
             Image(systemName: tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .symbolSwap()
                 .font(.system(size: 6.5))
                 .foregroundStyle(Palette.muted)
                 .frame(width: 13, height: 13)
@@ -313,6 +314,7 @@ struct IconGroupBracket: View {
             .fill(Palette.ink.opacity(0.18))
             .frame(width: 2)
             .opacity(folded ? 0 : 1)
+            .animation(Motion.quick, value: folded)
             .allowsHitTesting(false)
     }
 }

@@ -37,7 +37,7 @@ enum SiteCardPanel {
         anchor = field
         let key = ObjectIdentifier(browser)
         guard watching[key] == nil else { return }
-        watching[key] = browser.$editingTab.combineLatest(browser.$tabDraft)
+        watching[key] = browser.$editingTab.combineLatest(browser.tabEdit.$draft)
             .receive(on: DispatchQueue.main)
             .sink { [weak browser] editing, draft in
                 MainActor.assumeIsolated {
@@ -121,7 +121,17 @@ enum SiteCardPanel {
             }
         }
         panel.setFrameOrigin(origin)
+        // Fades up in a moment rather than appearing whole, as a menu does.
+        panel.alphaValue = Motion.reduced ? 1 : 0
+        shownAt = Date()
         window.addChildWindow(panel, ordered: .above)
+        if !Motion.reduced {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.12
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+        }
         // Its size follows the card, keeping the edge nearest the address
         // where it is.
         host.onResize = { [weak panel] fitted in
@@ -130,7 +140,17 @@ enum SiteCardPanel {
             var frame = panel.frame
             if !above { frame.origin.y += frame.height - fitted.height }
             frame.size = fitted
-            panel.setFrame(frame, display: true)
+            // Going deeper (permissions, certificate): it grows into its new
+            // size. Its first fit, before it shows, is made at once.
+            if panel.isVisible, Date().timeIntervalSince(SiteCardPanel.shownAt) > 0.2, !Motion.reduced {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.18
+                    context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1)
+                    panel.animator().setFrame(frame, display: true)
+                }
+            } else {
+                panel.setFrame(frame, display: true)
+            }
         }
         self.panel = panel
         resign = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
@@ -151,13 +171,29 @@ enum SiteCardPanel {
         return image
     }
 
+    /// When it came up: a fit in its first moments is its first, made at once.
+    private static var shownAt = Date.distantPast
+
     static func hide() {
         if let resign { NotificationCenter.default.removeObserver(resign) }
         resign = nil
         guard let panel else { return }
-        panel.parent?.removeChildWindow(panel)
-        panel.orderOut(nil)
         self.panel = nil
+        guard !Motion.reduced else {
+            panel.parent?.removeChildWindow(panel)
+            panel.orderOut(nil)
+            return
+        }
+        // Out as quickly as a menu goes.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.08
+            panel.animator().alphaValue = 0
+        } completionHandler: {
+            MainActor.assumeIsolated {
+                panel.parent?.removeChildWindow(panel)
+                panel.orderOut(nil)
+            }
+        }
     }
 
     private final class Panel: NSPanel {

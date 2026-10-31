@@ -72,6 +72,12 @@ struct TitleAtRest: View {
 
     private var on: Bool { shown && rest != nil }
 
+    /// How far the two lines roll past each other: the title up and out as
+    /// the address comes up from below, and back. A plain cross-fade put both
+    /// on the same line for a few frames, one smudge of two words.
+    private var roll: CGFloat { Motion.reduced ? 0 : size * 0.55 }
+    private var showsRest: Bool { on && !hovering }
+
     var body: some View {
         ZStack(alignment: .leading) {
             Text(label)
@@ -79,14 +85,16 @@ struct TitleAtRest: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundStyle(colour)
-                .opacity(on && !hovering ? 0 : 1)
+                .opacity(showsRest ? 0 : 1)
+                .offset(y: showsRest ? -roll : 0)
             if let rest, on {
                 AtRestLine(rest: rest, size: size, compact: !roomy)
                     .opacity(hovering ? 0 : 1)
-                    .transition(.opacity)
+                    .offset(y: hovering ? roll : 0)
+                    .transition(.opacity.combined(with: .offset(y: roll)))
             }
         }
-        .animation(Motion.reduced ? nil : .easeInOut(duration: 0.22), value: on)
-        .animation(Motion.reduced ? nil : .easeInOut(duration: 0.22), value: hovering)
+        .animation(Motion.reduced ? nil : .smooth(duration: 0.24), value: on)
+        .animation(Motion.reduced ? nil : .smooth(duration: 0.24), value: hovering)
     }
 }

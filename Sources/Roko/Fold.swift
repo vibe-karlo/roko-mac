@@ -44,6 +44,14 @@ import SwiftUI
 extension Browser {
     /// ⌘S. The column, or the strip across the top, out of the way, or back.
     func toggleFold() {
+        // Peeked out already: the column is where it is going, so it stays
+        // put rather than vanishing and sliding back in.
+        if folded && peeking {
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { folded = false; peeking = false }
+            return
+        }
         peeking = false
         withAnimation(Motion.folding(out: folded)) { folded.toggle() }
     }

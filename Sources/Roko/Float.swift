@@ -96,7 +96,10 @@ final class Float {
     /// `still`: the video as it was in its tab, cut out of a picture of the
     /// page (see `still(of:picture:page:)`), shown until the page is laid out
     /// at this window's size.
-    func lift(_ page: NSView, still: NSImage? = nil) {
+    ///
+    /// `from`: where the video was on screen, in its tab. The picture flies
+    /// from there to the window's corner, and the window shows once it lands.
+    func lift(_ page: NSView, still: NSImage? = nil, from: NSRect? = nil) {
         guard panel == nil else { return }
         self.page = page
 
@@ -200,6 +203,9 @@ final class Float {
         self.controls = controls
 
         panel.contentView = ground
+        if let from, let still, Float.benchAway == nil, !Motion.reduced {
+            fly(still, from: from, to: spot, then: panel)
+        }
         panel.orderFrontRegardless()
         self.panel = panel
 
@@ -234,6 +240,63 @@ final class Float {
                 }
             }
         }
+    }
+
+    /// The video's picture flown from its place in the tab to the window,
+    /// in a window of its own with nothing in it but the picture: the page
+    /// itself, carried the whole way, would be laid out again at every size
+    /// it passed through. The real window waits unseen and takes over where
+    /// the picture lands, and shows by itself a moment later if the flight
+    /// never ends.
+    private func fly(_ still: NSImage, from: NSRect, to spot: NSRect, then panel: NSPanel) {
+        let flight = NSPanel(contentRect: from, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        flight.level = .floating
+        flight.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        flight.backgroundColor = .clear
+        flight.isOpaque = false
+        flight.hasShadow = false
+        flight.ignoresMouseEvents = true
+        flight.isReleasedWhenClosed = false
+        let picture = NSView(frame: NSRect(origin: .zero, size: from.size))
+        picture.wantsLayer = true
+        picture.layer?.backgroundColor = NSColor.black.cgColor
+        picture.layer?.contents = still.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        picture.layer?.contentsGravity = .resizeAspect
+        picture.layer?.cornerRadius = 14
+        picture.layer?.masksToBounds = true
+        picture.autoresizingMask = [.width, .height]
+        flight.contentView = picture
+        panel.alphaValue = 0
+        flight.orderFrontRegardless()
+
+        var landed = false
+        let land = {
+            guard !landed else { return }
+            landed = true
+            panel.alphaValue = 1
+            flight.orderOut(nil)
+            flight.close()
+        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = Motion.light ? 0.2 : 0.36
+            // Quick off the mark and easing into the corner, as a thing thrown.
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.85, 0.25, 1)
+            flight.animator().setFrame(spot, display: true)
+        }, completionHandler: { MainActor.assumeIsolated { land() } })
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { land() }
+    }
+
+    /// Where a video sits on screen in its tab: `picture` and `size` as the
+    /// page gives them (see `still`). Nil when the page's window isn't on
+    /// screen to be flown out of.
+    static func onScreen(_ page: NSView, picture: [Double], size: [Double]) -> NSRect? {
+        guard picture.count == 4, size.count == 2, size[0] > 0, picture[2] > 0, picture[3] > 0,
+              let window = page.window, window.isVisible, window.occlusionState.contains(.visible),
+              page.bounds.width > 0 else { return nil }
+        let box = window.convertToScreen(page.convert(page.bounds, to: nil))
+        let scale = box.width / size[0]
+        return NSRect(x: box.minX + picture[0] * scale, y: box.maxY - (picture[1] + picture[3]) * scale,
+                      width: picture[2] * scale, height: picture[3] * scale)
     }
 
     /// The window's last place and size, kept across closing it and quitting,
