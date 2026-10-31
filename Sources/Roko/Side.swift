@@ -29,7 +29,6 @@ struct SideBar: View {
     @Namespace private var before
     @Namespace private var after
 
-    @State private var groupFrames: [UUID: GroupDropFrame] = [:]
 
     /// A tab carried over the pins, or a pin over the tabs, and where it
     /// would land (see PinDrop).
@@ -213,7 +212,7 @@ struct SideBar: View {
                     .onEnded { _ in grabbed = nil }
             )
             .modifier(OneClick(double: true) {
-                withAnimation(Motion.settle) { prefs.sideWidth = Metrics.side }
+                Motion.easeWidth { prefs.sideWidth = Metrics.side }
             })
             .animation(Motion.quick, value: onEdge)
     }
@@ -722,12 +721,11 @@ struct SideBar: View {
         }
         .coordinateSpace(name: "rows")
         .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named("column")) }) { [frames] in frames.rows = $0 }
-        .onPreferenceChange(GroupDropFrames.self) { groupFrames = $0 }
     }
 
     private func destination(_ tab: Tab, at point: CGPoint) -> GroupDropTarget? {
         guard prefs.usesTabGroups, tab.pin == nil else { return nil }
-        return GroupDropFrames.resolve(point, frames: groupFrames, groups: browser.tabGroups,
+        return GroupDropFrames.resolve(point, frames: browser.groupFrames["rows"], groups: browser.tabGroups,
                                        excluding: tab.id, vertical: true)
     }
 
@@ -830,7 +828,7 @@ struct SideBar: View {
         case .loose:
             guard tab.pin != nil else { return nil }
             let inRows = CGPoint(x: point.x - frames.rows.minX, y: point.y - frames.rows.minY)
-            if prefs.usesTabGroups, let id = groupFrames.values.first(where: { $0.rect.contains(inRows) })?.group {
+            if prefs.usesTabGroups, let id = browser.groupFrames["rows"].values.first(where: { $0.rect.contains(inRows) })?.group {
                 return .group(id)
             }
             let loose = looseTabs
@@ -1179,6 +1177,28 @@ private struct SideRow: View {
                     TranslateSign(tab: tab, colour: colour)
                     TitleAtRest(label: tab.label, rest: rest, shown: atRest, hovering: hovering,
                                 size: prefs.sideTitle, colour: colour, roomy: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // The title keeps its length under the pointer and
+                        // fades out beneath the cross, rather than being cut
+                        // shorter, so its end doesn't jump on each row the
+                        // pointer passes. The title alone, not the whole row:
+                        // a row under a mask is drawn offscreen, every row on
+                        // every frame of the column's slide or a scroll.
+                        .mask {
+                            ZStack {
+                                Rectangle().opacity(hovering && (!status || speaker) ? 0 : 1)
+                                HStack(spacing: 0) {
+                                    Rectangle()
+                                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                                        .frame(width: 16)
+                                    // The row's own margin is already past
+                                    // the title's end; a peek's badge, more;
+                                    // beside a speaker the cross stands in
+                                    // over the title's last letters.
+                                    Color.clear.frame(width: peeking ? 0 : speaker ? 19 : 16)
+                                }
+                            }
+                        }
                 }
                 Spacer(minLength: 0)
             }
@@ -1212,29 +1232,16 @@ private struct SideRow: View {
                     }
                 }
                 .frame(width: 15, height: 15)
-                // The cross takes this place while the pointer is here; the
-                // speaker moves one place in, clear of the cross's reach.
+                // The cross takes the ring's place while the pointer is
+                // here. The speaker stays where it is, and the cross comes in
+                // beside it: the speaker sliding over made way, but it moved
+                // under the pointer and cut the title shorter as it went.
                 .opacity(hovering && !speaker ? 0 : 1)
-                .padding(.trailing, hovering && speaker ? 23 : 0)
             }
         }
         .padding(.trailing, status || peeking ? 7 : 0)
         .frame(height: prefs.sideRow)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // The title keeps its length under the pointer and fades out
-        // beneath the cross, rather than being cut shorter, so its end
-        // doesn't jump on each row the pointer passes.
-        .mask {
-            ZStack {
-                Rectangle().opacity(hovering && !editing && !status ? 0 : 1)
-                HStack(spacing: 0) {
-                    Rectangle()
-                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
-                        .frame(width: 16)
-                    Color.clear.frame(width: 26)
-                }
-            }
-        }
         .overlay(alignment: .trailing) {
             if !editing {
                 ZStack {
@@ -1257,7 +1264,7 @@ private struct SideRow: View {
                         .contentShape(Rectangle())
                         .onTapGesture { if hovering { close() } }
                 }
-                .padding(.trailing, 7)
+                .padding(.trailing, speaker ? 30 : 7)
             }
         }
         .animation(Motion.quick, value: tab.loading)

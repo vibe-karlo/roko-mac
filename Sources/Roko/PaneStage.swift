@@ -1068,7 +1068,7 @@ extension PaneStage {
             let slot = slots[index]
             slot.alphaValue = 0
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = reduced ? 0.15 : 0.3
+                context.duration = reduced ? 0.15 : Motion.light ? 0.16 : 0.3
                 context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 slot.animator().alphaValue = 1
             }

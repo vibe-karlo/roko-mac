@@ -87,8 +87,8 @@ struct Page: View {
         .animation(Motion.quick, value: tab.failure)
         .animation(Motion.quick, value: tab.floating)
         .animation(Motion.quick, value: tab.reader)
-        .animation(Motion.reduced ? nil : .easeOut(duration: 0.2), value: tab.cover == nil)
-        .animation(Motion.reduced ? nil : .easeOut(duration: 0.16), value: tab.pull == nil)
+        .animation(Motion.own(.easeOut(duration: 0.2)), value: tab.cover == nil)
+        .animation(Motion.own(.easeOut(duration: 0.16)), value: tab.pull == nil)
         // Another tab in front is another page, not this one changing: its
         // error, cover or kind of page is there at once, with no fade from
         // the last tab's (which flashed empty ground going to Settings).
@@ -173,7 +173,7 @@ private struct Disc: View {
         .offset(x: (pull.back ? 1 : -1) * (10 + reach * 0.2 + (pull.going ? 12 : 0)))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: pull.back ? .leading : .trailing)
         .allowsHitTesting(false)
-        .animation(.easeOut(duration: 0.22), value: pull.going)
+        .animation(Motion.own(.easeOut(duration: 0.22)), value: pull.going)
     }
 }
 
@@ -222,8 +222,8 @@ private struct HistoryList: View {
         .offset(x: (pull.back ? 1 : -1) * (10 + reach * 0.2), y: slide)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: pull.back ? .leading : .trailing)
         .allowsHitTesting(false)
-        .animation(.spring(response: 0.22, dampingFraction: 0.9), value: pull.picked)
-        .animation(.easeOut(duration: 0.26), value: pull.going)
+        .animation(Motion.own(.spring(response: 0.22, dampingFraction: 0.9)), value: pull.picked)
+        .animation(Motion.own(.easeOut(duration: 0.26)), value: pull.going)
     }
 
     @ViewBuilder

@@ -265,6 +265,28 @@ enum Motion {
 
     nonisolated static let lightKey = "motion.light"
 
+    /// When the column's width was last changed with an animation (its edge
+    /// double-clicked, the icon column switched on or off in Settings): a
+    /// column growing that way slides over the page, which gives up its room
+    /// once the slide is over, rather than at once, leaving a gap beside the
+    /// column while it grew (see `make(room:after:)` in App.swift).
+    nonisolated(unsafe) static var widthEased: CFTimeInterval = 0
+
+    static func easeWidth(_ change: () -> Void) {
+        widthEased = CACurrentMediaTime()
+        withAnimation(settle, change)
+    }
+
+    /// How long the chrome takes to slide in, for the page to wait before it
+    /// gives up its room.
+    static var slideIn: Double { light ? 0.2 : 0.42 }
+
+    /// A view's own curve, held to the same rules as the tokens: none with
+    /// Reduce Motion, and a short ease-out on a Mac short of power.
+    static func own(_ animation: Animation) -> Animation? {
+        reduced ? nil : light ? .easeOut(duration: 0.14) : animation
+    }
+
     static var glide: Animation? {
         reduced ? nil : light ? .easeOut(duration: 0.16) : .spring(response: 0.34, dampingFraction: 0.82)
     }

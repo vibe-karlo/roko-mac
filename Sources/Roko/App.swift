@@ -691,7 +691,10 @@ struct ContentView: View {
         // Out of nothing, or out of the card's gap (see chrome): never more
         // than that unless something is there.
         let floor = Metrics.cardGap
-        let arriving = (old.width <= floor && new.width > floor, old.height <= floor && new.height > floor)
+        // A column made wider with an animation arrives too, over a page
+        // that waits at its old size (see Motion.widthEased).
+        let eased = CACurrentMediaTime() - Motion.widthEased < 0.3 && new.width > now.width
+        let arriving = (old.width <= floor && new.width > floor || eased, old.height <= floor && new.height > floor)
         var at = now
         if !arriving.0 { at.width = new.width }
         if !arriving.1 { at.height = new.height }
@@ -703,7 +706,7 @@ struct ContentView: View {
         withTransaction(still) { room = Motion.reduced ? new : at }
         guard !Motion.reduced, arriving.0 || arriving.1 else { return }
         let ticket = roomTicket
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Motion.slideIn) {
             guard ticket == roomTicket else { return }
             withTransaction(still) { room = chrome }
         }
@@ -839,7 +842,12 @@ struct ContentView: View {
             .overlay { panels }
             .overlay { switcherOverlay }
             .overlay(alignment: .topTrailing) {
-                if let job = browser.fileImport { ImportProgress(browser: browser, job: job) }
+                ZStack {
+                    if let job = browser.fileImport { ImportProgress(browser: browser, job: job) }
+                }
+                // Outside the condition, so the card fades in and out as it
+                // says, rather than popping (its transition had nothing to run it).
+                .animation(Motion.settle, value: browser.fileImport == nil)
             }
             .environment(\.tabShortcutNumbers, browser.tabShortcutNumbers)
             // The field comes on its spring, and goes quickly: once Return
@@ -1783,11 +1791,12 @@ private struct ImportProgress: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Palette.hairline)
                 if let fraction {
-                    Capsule().fill(Palette.ink.opacity(0.7)).frame(width: geo.size.width * fraction)
+                    Capsule().fill(Palette.ink.opacity(0.7)).frame(width: max(3, geo.size.width * fraction))
                 }
             }
         }
         .frame(height: 3)
+        .animation(Motion.own(.easeOut(duration: 0.25)), value: fraction)
     }
 
     private var footer: some View {

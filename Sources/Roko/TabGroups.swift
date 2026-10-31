@@ -14,12 +14,38 @@ struct GroupDropTarget: Equatable {
     var after = false
 }
 
-struct GroupDropFrames: PreferenceKey {
-    static var defaultValue: [UUID: GroupDropFrame] = [:]
+/// Where the group headings and their tabs are laid out, by the space they
+/// are measured in ("rows" in the column, "strip" across the top): written
+/// as they are laid out and read only when a drag asks where it would land.
+/// Kept in a class rather than handed up as a preference into the view's
+/// state, which drew the whole column again on every frame of any row's
+/// animation while groups were on (Browser.groupFrames).
+@MainActor
+final class GroupFrameStore {
+    private(set) var frames: [String: [UUID: GroupDropFrame]] = [:]
 
-    static func reduce(value: inout [UUID: GroupDropFrame], nextValue: () -> [UUID: GroupDropFrame]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    func set(_ frame: GroupDropFrame, for id: UUID, in space: String) {
+        frames[space, default: [:]][id] = frame
     }
+
+    func remove(_ id: UUID, in space: String) {
+        frames[space]?[id] = nil
+    }
+
+    subscript(space: String) -> [UUID: GroupDropFrame] { frames[space] ?? [:] }
+}
+
+extension View {
+    /// This heading's or tab's frame, unshifted, kept in `store`.
+    func groupFrame(_ store: GroupFrameStore, id: UUID, group: UUID, tab: UUID? = nil, in space: String) -> some View {
+        onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(space)) }) { rect in
+            store.set(GroupDropFrame(group: group, tab: tab, rect: rect), for: id, in: space)
+        }
+        .onDisappear { store.remove(id, in: space) }
+    }
+}
+
+enum GroupDropFrames {
 
     static func resolve(_ point: CGPoint, frames: [UUID: GroupDropFrame],
                         groups: [TabGroup], excluding source: UUID, vertical: Bool) -> GroupDropTarget? {
@@ -193,10 +219,7 @@ private struct GroupHeadingShared: ViewModifier {
         content
             .background {
                 if let dragSpace {
-                    GeometryReader { geometry in
-                        Color.clear.preference(key: GroupDropFrames.self,
-                                               value: [group.id: GroupDropFrame(group: group.id, rect: geometry.frame(in: .named(dragSpace)))])
-                    }
+                    Color.clear.groupFrame(browser.groupFrames, id: group.id, group: group.id, in: dragSpace)
                 }
             }
             .onDrop(of: [.text], isTargeted: $dropping) { providers in

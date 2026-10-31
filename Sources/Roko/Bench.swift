@@ -979,6 +979,15 @@ final class Bench {
             }
             step(1)
 
+        case "hover":
+            // A row of the column as the pointer coming over it leaves it, or
+            // going: its own answer, as hoversweep calls it. Test runs only.
+            guard Store.testing else { answer(["error": "hover is for test runs"]); return }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            guard let hover = Bench.hoverRows[tab.id] else { answer(["error": "that tab has no row in the column"]); return }
+            hover(request["off"] as? Bool != true)
+            answer(["hovering": request["off"] as? Bool != true])
+
         case "hoversweep":
             // The pointer taken down the column's rows and back, one row a
             // frame, for what each crossing costs: how many rows were built
@@ -3485,7 +3494,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "openmark", "close", "wait", "sleep", "select", "text", "nowplaying", "eval", "click", "type", "submit", "shot", "probe", "key", "textcheck", "resize", "hit", "pointer", "film", "float", "window", "pages", "picture", "pdf", "place", "group", "tospace", "field", "bookmark", "marks", "menu", "keyeq", "fill", "pin", "middle", "windows", "alive", "quit", "towindow", "pull", "magnify", "wheel", "space", "split", "strip", "column", "fold", "consent", "site", "little", "ui", "import", "import-preview", "import-file", "import-file-start", "import-file-status", "import-file-cancel", "remove-folder", "passwords", "accounts", "find", "answer", "visible", "notifications", "popups", "suggest", "translate", "profile", "settings",
+                "tabs", "hover", "open", "go", "openmark", "close", "wait", "sleep", "select", "text", "nowplaying", "eval", "click", "type", "submit", "shot", "probe", "key", "textcheck", "resize", "hit", "pointer", "film", "float", "window", "pages", "picture", "pdf", "place", "group", "tospace", "field", "bookmark", "marks", "menu", "keyeq", "fill", "pin", "middle", "windows", "alive", "quit", "towindow", "pull", "magnify", "wheel", "space", "split", "strip", "column", "fold", "consent", "site", "little", "ui", "import", "import-preview", "import-file", "import-file-start", "import-file-status", "import-file-cancel", "remove-folder", "passwords", "accounts", "find", "answer", "visible", "notifications", "popups", "suggest", "translate", "profile", "settings",
             ]])
         }
     }

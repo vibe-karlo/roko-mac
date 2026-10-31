@@ -18,6 +18,10 @@ Newest first.
   highlight glides between rows, a tab picked up lifts, and a tab opened behind glows a moment so
   you see where it went.
 - A summary streams in at an even pace instead of in bursts.
+- Double-clicking the column's edge, or switching to the icon column, slides the column over the
+  page without leaving a gap beside it. The speaker on a tab that plays sound stays put under the
+  pointer, and ⌘T's card comes down into place rather than scaling around a field that doesn't.
+- Reduce Motion and the light motion for a Mac short of power now reach every animation.
 - Less work: a loading page, a swipe between spaces, a letter typed in a tab or the find bar, and
   a tab opened past the point where the column scrolls no longer redraw every row.
 

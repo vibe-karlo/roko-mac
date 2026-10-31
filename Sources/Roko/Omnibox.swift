@@ -70,7 +70,10 @@ struct Omnibox: View {
                 // because the strip at the top isn't part of what the eye is
                 // measuring.
                 .padding(.bottom, 60)
-                .transition(.scale(scale: 0.97).combined(with: .opacity))
+                // Down into place and in, not scaled: the field's text is
+                // AppKit's and doesn't scale, so the card grew around words
+                // that stood still.
+                .transition(.offset(y: -8).combined(with: .opacity))
                 // The list's arrival and its leaving are animated from here,
                 // briefly: nothing that changes the suggestions does it inside
                 // an animation of its own. Its rows follow what was typed or

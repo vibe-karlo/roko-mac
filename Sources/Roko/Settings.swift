@@ -386,8 +386,12 @@ struct SettingsPanel: View {
                     let first = byGroup[group.id]?.first
                     query = ""
                     page = group.page
-                    lit = first?.findOnly == false ? first?.id : nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { withAnimation(Motion.quick) { lit = nil } }
+                    let shown = first?.findOnly == false ? first?.id : nil
+                    lit = shown
+                    // Only the one it lit: a second result picked meanwhile keeps its light.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                        if lit == shown { withAnimation(Motion.quick) { lit = nil } }
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: group.icon).font(.system(size: 10.5, weight: .medium))
@@ -498,7 +502,10 @@ struct SettingsPanel: View {
             Pictures(options: TabsLayout.allCases.map { ($0, $0.title, AnyView(LayoutPicture(layout: $0))) },
                      selection: Binding(
                         get: { prefs.tabsLayout },
-                        set: { layout in withAnimation(Motion.glide) { prefs.tabsLayout = layout } }
+                        set: { layout in
+                            Motion.widthEased = CACurrentMediaTime()
+                            withAnimation(Motion.glide) { prefs.tabsLayout = layout }
+                        }
                      ))
         case "sidebar.hides": Switch(on: $prefs.sideHides)
         case "sidebar.addressBar": Switch(on: $prefs.sideAddressBar)
@@ -1328,9 +1335,18 @@ struct Segmented<Option: Hashable>: View {
     var body: some View {
         HStack(spacing: 2) {
             ForEach(options, id: \.0) { option, title in
+                // As wide as it is when picked, whether it is or not: the
+                // words beside it stood a point further off each time the
+                // weight changed, while the white slid between them.
                 Text(title)
-                    .font(.system(size: 11.5, weight: option == selection ? .medium : .regular))
-                    .foregroundStyle(option == selection ? Palette.ink : Palette.muted)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .hidden()
+                    .overlay {
+                        Text(title)
+                            .font(.system(size: 11.5, weight: option == selection ? .medium : .regular))
+                            .foregroundStyle(option == selection ? Palette.ink : Palette.muted)
+                            .lineLimit(1)
+                    }
                     .lineLimit(1)
                     .fixedSize(horizontal: !wide, vertical: false)
                     .frame(maxWidth: wide ? .infinity : nil)

@@ -17,7 +17,6 @@ struct TabBar: View {
 
     /// Which tab is under the hand, where it started, and how far it has come.
     @State private var landing = false
-    @State private var groupFrames: [UUID: GroupDropFrame] = [:]
     /// The plus only comes out when the pointer is in the row.
     @State private var nearby = false
     @State private var plussed = false
@@ -115,7 +114,6 @@ struct TabBar: View {
                                         }
                                     }
                                     .frame(height: Metrics.strip)
-                                    .onPreferenceChange(GroupDropFrames.self) { groupFrames = $0 }
                                 }
                                 .scrollDisabled(!overflowing(in: geo.size.width))
                                 .frame(width: run(in: geo.size.width))
@@ -183,12 +181,11 @@ struct TabBar: View {
                         }
                         BookmarkDoor(browser: browser, arrowEdge: .bottom)
                     }
-                    .background {
-                        GeometryReader { box in
-                            Color.clear
-                                .onAppear { doors = box.size.width }
-                                .onChange(of: box.size.width) { _, width in doors = width }
-                        }
+                    // Measured a frame after it changes, so the tabs ease to
+                    // their new width as the downloads button comes or goes,
+                    // rather than snapping a frame late.
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
+                        if doors == 0 { doors = width } else { withAnimation(Motion.settle) { doors = width } }
                     }
                 }
                 // The traffic lights are the system's. The row starts after
@@ -373,7 +370,7 @@ struct TabBar: View {
 
     private func destination(_ tab: Tab, at point: CGPoint) -> GroupDropTarget? {
         guard browser.prefs.usesTabGroups, tab.pin == nil else { return nil }
-        return GroupDropFrames.resolve(point, frames: groupFrames, groups: browser.tabGroups,
+        return GroupDropFrames.resolve(point, frames: browser.groupFrames["strip"], groups: browser.tabGroups,
                                        excluding: tab.id, vertical: false)
     }
 
@@ -828,13 +825,14 @@ private struct TabPill: View {
                 TabShortcutNumber(number: number)
             }
 
-            // The speaker, which can be pressed, is at the end of the pill on
-            // its own, and one place in under the pointer, beside the cross
-            // and clear of its reach.
+            // The speaker, which can be pressed, stands one place in from the
+            // end, beside the cross and clear of its reach, with the pointer
+            // there or not: it slid over as the pointer came, under the
+            // pointer, and cut the title shorter as it went.
             HStack(spacing: 0) {
                 if speaker {
                     Speaker(tab: tab)
-                        .padding(.trailing, hovering ? 8 : 0)
+                        .padding(.trailing, 8)
                         .transition(.opacity)
                 }
 
@@ -853,7 +851,7 @@ private struct TabPill: View {
                         Ring().transition(.opacity)
                     }
                 }
-                .frame(width: editing || (speaker && !hovering) ? 0 : 15, height: 15)
+                .frame(width: editing ? 0 : 15, height: 15)
                 .opacity(editing ? 0 : 1)
                 // The cross is 15 points across because that is how big it should
                 // look. What you have to hit is the whole right-hand end of the
@@ -1009,11 +1007,7 @@ struct Carried: ViewModifier {
             .offset(x: vertical ? 0 : shift, y: vertical ? shift : 0)
             .background {
                 if let browser, let tab, browser.prefs.usesTabGroups, let group = browser.group(of: tab) {
-                    GeometryReader { geometry in
-                        Color.clear.preference(key: GroupDropFrames.self,
-                            value: [tab.id: GroupDropFrame(group: group, tab: tab.id,
-                                                         rect: geometry.frame(in: .named(space)))])
-                    }
+                    Color.clear.groupFrame(browser.groupFrames, id: tab.id, group: group, tab: tab.id, in: space)
                 }
             }
             // Under the hand exactly. Its place in the row springs when it

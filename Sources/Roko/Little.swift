@@ -375,7 +375,7 @@ struct LittleView: View {
                 Swiping(pull: tab.pull)
             }
             .animation(Motion.quick, value: tab.failure)
-            .animation(.easeOut(duration: 0.16), value: tab.pull == nil)
+            .animation(Motion.own(.easeOut(duration: 0.16)), value: tab.pull == nil)
         }
         .background(Palette.ground)
         .overlay(alignment: .bottom) { if let note { LittleToast(note: note) } }

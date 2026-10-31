@@ -1926,6 +1926,8 @@ final class Browser: NSObject, ObservableObject {
     // The draft and its list are kept in `tabEdit`, watched by the field and
     // its list alone: each letter redrew every row while they were here.
     let tabEdit = TabEditState()
+    /// Where folder headings and their tabs lie, for a drag (GroupFrameStore).
+    let groupFrames = GroupFrameStore()
     var tabDraft: String {
         get { tabEdit.draft }
         set { tabEdit.draft = newValue }

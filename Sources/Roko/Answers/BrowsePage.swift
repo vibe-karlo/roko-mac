@@ -150,7 +150,7 @@ private struct TurnView: View {
                 }
             }
             .frame(width: 220, height: 3)
-            .animation(.easeInOut(duration: 0.6), value: turn.progress)
+            .animation(Motion.own(.easeInOut(duration: 0.6)), value: turn.progress)
             ForEach(turn.steps.suffix(6)) { step in
                 HStack(spacing: 8) {
                     Mark(icon: Favicons.shared.cached(for: step.url), letter: String(step.url.displayHost.prefix(1)).uppercased(), size: 13)

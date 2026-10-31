@@ -140,7 +140,7 @@ struct SummaryPanel: View {
                 }
             }
             .frame(height: 3)
-            .animation(.easeInOut(duration: 0.6), value: model.progress)
+            .animation(Motion.own(.easeInOut(duration: 0.6)), value: model.progress)
         }
     }
 
