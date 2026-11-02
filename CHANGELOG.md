@@ -55,6 +55,7 @@ Newest first.
 - ⌘T: typing no longer redraws the window, and the top result can start loading after a short
   pause.
 - Fixed: a crash inside WebKit when a profile's data was deleted before WebKit had started.
+- Fixed: a crash as a summary finished writing.
 
 ### New
 

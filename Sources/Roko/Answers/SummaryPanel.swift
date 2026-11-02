@@ -163,7 +163,7 @@ struct SummaryPanel: View {
 /// sentence and pushed everything under it down at once, twenty times a
 /// second. The further behind it is, the faster it goes, so it is never more
 /// than a moment behind; a summary already written shows whole at once.
-private struct PacedMarkdown: View {
+struct PacedMarkdown: View {
     let text: String
     let streaming: Bool
     @State private var shown: String?
@@ -199,15 +199,23 @@ private struct PacedMarkdown: View {
             while !Task.isCancelled, let here = shown, here.count < written.count {
                 let target = written
                 guard target.hasPrefix(here) else { shown = target; break }
-                let behind = target.count - here.count
-                var end = target.index(target.startIndex, offsetBy: here.count + max(2, behind / 7))
-                // Whole words where one ends close by: half a word drawn, then
-                // the rest, made the line flicker as it wrapped.
-                if let space = target[end...].prefix(10).firstIndex(where: \.isWhitespace) { end = space }
-                shown = String(target[..<end])
+                shown = Self.step(from: here, towards: target)
                 try? await Task.sleep(for: frame)
             }
             pacing = nil
         }
+    }
+
+    /// The next frame's text: a seventh of what is still to come, two
+    /// characters at least, never past the end.
+    static func step(from here: String, towards target: String) -> String {
+        let behind = target.count - here.count
+        guard behind > 0 else { return target }
+        let start = target.index(target.startIndex, offsetBy: here.count)
+        var end = target.index(start, offsetBy: max(2, behind / 7), limitedBy: target.endIndex) ?? target.endIndex
+        // Whole words where one ends close by: half a word drawn, then
+        // the rest, made the line flicker as it wrapped.
+        if let space = target[end...].prefix(10).firstIndex(where: \.isWhitespace) { end = space }
+        return String(target[..<end])
     }
 }
