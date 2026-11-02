@@ -1,6 +1,7 @@
 // Checks a built roko Shield in a hidden Chromium: the lists load, requests
 // to ad hosts are refused, hiding and empty-slot folding work, a site paused
-// loads untouched, and a pop-up window to an ad host is closed.
+// loads untouched, a pop-up window to an ad host is closed, and Hide
+// Distracting Items hides, keeps, undoes, peeks and restores.
 //
 //   python3 ShieldExtension/build.py
 //   node ShieldExtension/test.mjs          (needs playwright-core and its chromium:
@@ -21,10 +22,13 @@ const extension = path.resolve(here, "..", "build", "roko-shield");
 const PAGE = `<!doctype html><meta charset="utf-8"><title>fixture</title>
 <style>body{font:16px system-ui;margin:20px} .box{height:250px;background:#eee;margin:10px 0}</style>
 <p id="story">A story worth reading, with words in it.</p>
+<aside id="related" aria-label="Related stories" style="height:120px;background:#ddd">Related stories</aside>
+<div class="newsletter-box" style="height:80px;background:#ccc">Sign up for our newsletter</div>
 <div id="AdBillboard" class="box">billboard</div>
 <ins class="adsbygoogle box"></ins>
 <div class="post-ad-container box">Advertisement</div>
-<div class="box" id="real">A real paragraph that is not an ad at all, and says so at length.</div>`;
+<div class="box" id="real">A real paragraph that is not an ad at all, and says so at length.</div>
+`;
 
 const server = http.createServer((req, res) => {
   res.setHeader("content-type", "text/html");
@@ -116,6 +120,77 @@ try {
   check((await fetched("https://securepubads.g.doubleclick.net/tag/js/gpt.js")) !== "refused", "paused: the ad host isn't refused");
   check(await shown("#AdBillboard"), "paused: nothing hidden");
   await settings.evaluate(() => chrome.runtime.sendMessage({ to: "change", body: { paused: [] } }));
+
+  // Hide Distracting Items: point, and it goes for good on this site.
+  await page.goto(origin + "/");
+  const tabId = await settings.evaluate(async (url) => (await chrome.tabs.query({})).find((t) => t.url?.startsWith(url)).id, origin);
+  check(await settings.evaluate((id) => chrome.runtime.sendMessage({ to: "pick", body: { tabId: id } }), tabId), "pointing starts on the page");
+  const box = await page.locator("#related").boundingBox();
+  await page.mouse.move(box.x + 20, box.y + 20);
+  await page.mouse.move(box.x + 30, box.y + 30);
+  await page.mouse.down(); await page.mouse.up();
+  await page.waitForTimeout(600);
+  check(!(await shown("#related")), "the pointed-at sidebar is hidden");
+  const stored = await worker.evaluate(() => chrome.storage.local.get("hidden:localhost"));
+  const kept = stored["hidden:localhost"] || [];
+  check(kept.length === 1 && kept[0].selector === "#related" && kept[0].label === "Related stories", `kept for the site (${JSON.stringify(kept[0] || {})})`);
+  check(await page.evaluate(() => /Hidden on this site/.test(document.documentElement.innerText)), "the page says it's hidden and how to undo");
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
+  await page.waitForTimeout(600);
+  check(await shown("#related"), "⌘Z brings it back");
+  await page.mouse.move(box.x + 25, box.y + 25);
+  await page.mouse.down(); await page.mouse.up();
+  await page.waitForTimeout(400);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await page.click(".newsletter-box");
+  await page.waitForTimeout(400);
+  check(await shown(".newsletter-box") && await page.evaluate(() => document.documentElement.style.cursor === ""), "Escape stops pointing");
+  await page.reload();
+  check(await page.evaluate(() => {
+    const el = document.querySelector("#related");
+    return el && getComputedStyle(el).display === "none";
+  }), "still hidden as the page loads again");
+
+  // Hide this, from the right-click menu: what the menu was opened over.
+  await page.locator(".newsletter-box").dispatchEvent("contextmenu");
+  const described = await worker.evaluate(async (id) => {
+    await chrome.scripting.executeScript({ target: { tabId: id, frameIds: [0] }, files: ["bridge.js", "picker.js", "picker-keys.js"] });
+    const [r] = await chrome.scripting.executeScript({ target: { tabId: id, frameIds: [0] },
+      func: () => window.__officeVeil.describe(globalThis.__rokoContextTarget) });
+    return r.result;
+  }, tabId);
+  check(described && described.selector === "div.newsletter-box", `right-click names the element (${described && described.selector})`);
+
+  // The popup's list: resting on a line shows it, Restore brings it back.
+  const popup2 = await context.newPage();
+  await popup2.addInitScript(([id, url]) => { chrome.tabs.query = async () => [{ id, url }]; }, [tabId, origin + "/"]);
+  await popup2.goto(`chrome-extension://${id}/popup.html`);
+  await popup2.waitForTimeout(500);
+  check(await popup2.locator(".veil").count() === 1, "the popup lists what's hidden here");
+  await popup2.hover(".veil");
+  await page.waitForTimeout(500);
+  check(await shown("#related") && await page.evaluate(() => getComputedStyle(document.querySelector("#related")).outlineStyle === "solid"),
+    "resting on the line shows it, outlined");
+  await popup2.mouse.move(150, 5);
+  await page.waitForTimeout(500);
+  check(!(await shown("#related")), "leaving the list hides it again");
+  await popup2.hover(".veil");
+  await popup2.click(".veil .inline");
+  await page.waitForTimeout(500);
+  check(await shown("#related") && await popup2.locator(".veil").count() === 0, "Restore brings it back for good");
+  await popup2.close();
+
+  // The toolbar's mark follows the browser's light or dark, as the pages report it.
+  const dark = await context.newPage();
+  await dark.emulateMedia({ colorScheme: "dark" });
+  await dark.goto(origin + "/");
+  await dark.waitForTimeout(600);
+  check((await worker.evaluate(() => chrome.storage.session.get("dark"))).dark === true, "a dark browser gets the light mark");
+  await dark.emulateMedia({ colorScheme: "light" });
+  await dark.waitForTimeout(600);
+  check((await worker.evaluate(() => chrome.storage.session.get("dark"))).dark === false, "and back to black in light");
+  await dark.close();
 
   // Off everywhere: the lists go off with it.
   await settings.evaluate(() => chrome.runtime.sendMessage({ to: "change", body: { on: false } }));

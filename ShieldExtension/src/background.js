@@ -133,14 +133,25 @@ async function register(state) {
   if (scripts.length) await chrome.scripting.registerContentScripts(scripts);
 }
 
-// The toolbar's mark: orange where Shield is on for the page, grey where it
-// is off or paused, so a page that loads differently is never a mystery.
+// The toolbar's mark: black where Shield is on for the page (light on a dark
+// toolbar), grey where it is off or paused, so a page that loads differently
+// is never a mystery. Chrome can't tell an extension its theme, so the pages
+// do (veils.js), and the last one heard is kept.
 const icon = (name) => ({ 16: `icons/${name}-16.png`, 32: `icons/${name}-32.png`, 48: `icons/${name}-48.png` });
 async function showIcon(tabId, url, state) {
   state = state || (await settings());
   const site = siteOf(url);
   const on = state.on && !(site && isPaused(state, site));
-  await chrome.action.setIcon({ tabId, path: icon(on ? "on" : "off") }).catch(() => {});
+  const { dark } = await chrome.storage.session.get("dark");
+  await chrome.action.setIcon({ tabId, path: icon(on ? (dark ? "on-dark" : "on") : "off") }).catch(() => {});
+}
+async function scheme(body) {
+  const dark = !!body?.dark;
+  if ((await chrome.storage.session.get("dark")).dark === dark) return null;
+  await chrome.storage.session.set({ dark });
+  await chrome.action.setIcon({ path: icon(dark ? "on-dark" : "on") }).catch(() => {});
+  await showIcons();
+  return null;
 }
 async function showIcons() {
   const state = await settings();
@@ -150,7 +161,7 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.url || info.status === "loading") showIcon(tabId, tab.url);
 });
 
-chrome.runtime.onInstalled.addListener(() => apply());
+chrome.runtime.onInstalled.addListener(() => { apply(); menus(); });
 chrome.runtime.onStartup.addListener(() => apply());
 
 // MARK: Element hiding (CosmeticFilter)
@@ -392,26 +403,213 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 });
 chrome.tabs.onRemoved.addListener((tabId) => opened.delete(tabId));
 
+// MARK: Hide distracting items (Curtain.swift)
+//
+// What you point at goes, for good, on that site: kept per site under
+// "hidden:<site>" as roko keeps hidden.json, and put back on by veils.js
+// before each page draws. A private window writes nothing down: what it takes
+// off stays with that tab only, as roko's private tabs do.
+
+const hiddenKey = (site) => "hidden:" + site;
+const rule = (selector) => `${selector} { display: none !important; }`;
+
+async function veilsOn(site) {
+  return site ? (await chrome.storage.local.get(hiddenKey(site)))[hiddenKey(site)] || [] : [];
+}
+
+async function passing(tabId) {
+  const key = "passing:" + tabId;
+  return (await chrome.storage.session.get(key))[key] || [];
+}
+
+/** The stylesheet for a tab's page; one selector may be left out, to peek at it. */
+async function veilCSS(tab, spared = null) {
+  const own = (await veilsOn(siteOf(tab.url))).map((v) => v.selector);
+  const kept = tab.incognito ? [...own, ...(await passing(tab.id))] : own;
+  return kept.filter((s) => s !== spared).map(rule).join("\n");
+}
+
+const topFrame = (tabId) => ({ tabId, frameIds: [0] });
+
+/** The pointing script in the page, asleep until it is asked for. */
+async function arm(tabId) {
+  await chrome.scripting.executeScript({ target: topFrame(tabId), files: ["bridge.js", "picker.js", "picker-keys.js"] });
+}
+
+async function showVeils(tab, spared = null) {
+  const css = await veilCSS(tab, spared);
+  await chrome.scripting.executeScript({
+    target: topFrame(tab.id), args: [css],
+    func: (text) => {
+      let sheet = document.getElementById("office-veil");
+      if (!sheet) {
+        sheet = document.createElement("style");
+        sheet.id = "office-veil";
+        (document.head || document.documentElement).appendChild(sheet);
+      }
+      sheet.textContent = text;
+    },
+  }).catch(() => {});
+}
+
+/** ⌘⇧H, or Hide something… in the popup: pointing on, or off again. */
+async function togglePicking(tab, wanted = null) {
+  if (!tab?.id || !siteOf(tab.url)) return false;
+  try {
+    await arm(tab.id);
+    await chrome.scripting.executeScript({
+      target: topFrame(tab.id), args: [wanted],
+      func: (want) => {
+        const veil = window.__officeVeil;
+        if (want ?? !veil.isOn()) veil.on(); else veil.off();
+      },
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function hide(tab, picked) {
+  const site = siteOf(tab.url);
+  if (!site || !picked?.selector) return;
+  if (tab.incognito) {
+    const list = await passing(tab.id);
+    if (!list.includes(picked.selector)) list.push(picked.selector);
+    await chrome.storage.session.set({ ["passing:" + tab.id]: list });
+  } else {
+    const list = await veilsOn(site);
+    if (list.some((v) => v.selector === picked.selector)) return;
+    list.push({ selector: picked.selector, label: picked.label || picked.selector, note: picked.note || "", date: Date.now() });
+    await chrome.storage.local.set({ [hiddenKey(site)]: list });
+  }
+  await showVeils(tab);
+}
+
+/** ⌘Z while pointing: the last thing taken off comes back. */
+async function undoHiding(tab) {
+  const site = siteOf(tab.url);
+  if (tab.incognito) {
+    const list = await passing(tab.id);
+    if (!list.length) return null;
+    list.pop();
+    await chrome.storage.session.set({ ["passing:" + tab.id]: list });
+    await showVeils(tab);
+    return "It";
+  }
+  const list = await veilsOn(site);
+  const back = list.pop();
+  if (!back) return null;
+  await chrome.storage.local.set({ [hiddenKey(site)]: list });
+  await showVeils(tab);
+  return back.label;
+}
+
+async function veil(body, sender) {
+  if (!body || !sender.tab || sender.frameId !== 0) return null;
+  if (body.selector) {
+    await hide(sender.tab, body);
+    return { hidden: true };
+  }
+  if (body.undo) return { back: await undoHiding(sender.tab) };
+  return null;
+}
+
+async function restore(body) {
+  const tab = await chrome.tabs.get(body.tabId).catch(() => null);
+  const site = tab && siteOf(tab.url);
+  if (!site) return null;
+  const list = body.all ? [] : (await veilsOn(site)).filter((v) => v.selector !== body.selector);
+  await chrome.storage.local.set({ [hiddenKey(site)]: list });
+  await showVeils(tab);
+  return list;
+}
+
+/**
+ * The pointer resting on a row in the popup: that one thing back on the page,
+ * outlined, and scrolled to. The sheet is rebuilt without it rather than
+ * fought with another rule, so it comes back with the layout it had.
+ */
+async function peek(body) {
+  const tab = await chrome.tabs.get(body.tabId).catch(() => null);
+  if (!tab || !siteOf(tab.url)) return null;
+  try {
+    await arm(tab.id);
+    const css = await veilCSS(tab, body.selector);
+    await chrome.scripting.executeScript({
+      target: topFrame(tab.id), args: [css, body.selector || null],
+      func: (text, selector) => {
+        if (selector) window.__officeVeil.peek(text, selector); else window.__officeVeil.unpeek(text);
+      },
+    });
+  } catch (_) {}
+  return null;
+}
+
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === "hide-items") togglePicking(tab);
+});
+
+function menus() {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: "hide-this", title: "Hide this",
+      contexts: ["page", "image", "link", "video", "audio", "selection", "frame"],
+      documentUrlPatterns: ["http://*/*", "https://*/*"],
+    });
+  });
+}
+
+// What the menu was opened over, or, inside an embed, the embed itself.
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== "hide-this" || !tab?.id) return;
+  try {
+    await arm(tab.id);
+    const [found] = await chrome.scripting.executeScript({
+      target: topFrame(tab.id), args: [info.frameId ? info.frameUrl || "" : null],
+      func: (frameUrl) => {
+        let el = globalThis.__rokoContextTarget;
+        if (frameUrl !== null) el = [...document.querySelectorAll("iframe, frame")].find((f) => f.src === frameUrl) || null;
+        if (el && el.nodeType !== 1) el = el.parentElement;
+        if (!el || el === document.body || el === document.documentElement) return null;
+        return window.__officeVeil.describe(el);
+      },
+    });
+    if (found?.result) await hide(tab, found.result);
+  } catch (_) {}
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => chrome.storage.session.remove("passing:" + tabId));
+
 // MARK: Messages
 
 async function popupState(body) {
   const state = await settings();
   const site = siteOf(body.url);
-  return { state, site, paused: isPaused(state, site), accepted: acceptance(state, site) };
+  const shortcut = (await chrome.commands.getAll()).find((c) => c.name === "hide-items")?.shortcut || "";
+  return { state, site, paused: isPaused(state, site), accepted: acceptance(state, site),
+    hidden: await veilsOn(site), shortcut };
 }
 
 const handlers = {
   cosmetic,
   consent,
+  veil,
+  scheme,
   state: popupState,
   change: (body) => change(body),
+  pick: async (body) => togglePicking(await chrome.tabs.get(body.tabId).catch(() => null), true),
+  restore,
+  peek,
 };
+// Messages only the extension's own pages may send.
+const OWN = new Set(["state", "change", "pick", "restore", "peek"]);
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   const handle = handlers[message?.to];
   // Only the extension's own pages may change what is on; pages only get answers.
   const ours = (sender.url || "").startsWith(chrome.runtime.getURL(""));
-  if (!handle || (message.to === "change" || message.to === "state") && !ours) return false;
+  if (!handle || OWN.has(message.to) && !ours) return false;
   handle(message.body, sender).then(reply, () => reply(null));
   return true;
 });

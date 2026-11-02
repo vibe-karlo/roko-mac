@@ -82,6 +82,8 @@ Newest first.
 - "Add to roko" on the Chrome Web Store.
 - roko Shield: roko's blocking as a Chrome extension for Dia or any other Chromium browser, built
   from the same lists ([ShieldExtension](ShieldExtension/README.md)).
+  It has Hide Distracting Items too: point at anything, or right-click it, and it stays gone on
+  that site.
 - roko's blocking, as on iPhone: ads, trackers, cookie notices (answered with "reject") and
   annoyances, as WebKit content rules.
 

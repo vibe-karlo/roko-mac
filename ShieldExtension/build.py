@@ -252,6 +252,28 @@ def hide_index(text):
     return {"keyed": keyed, "always": always, "scoped": scoped, "untouched": untouched}
 
 
+def picker():
+    """Hide Distracting Items' pointing script, taken from Curtain.swift as it
+    is (Search's, MIT), with two doors added for the extension: describe(el),
+    for "Hide this" in the right-click menu, and isOn(), for the shortcut."""
+    swift = (ROOT / "Sources" / "Roko" / "Curtain.swift").read_text(encoding="utf-8")
+    start = swift.index('    static let picker = """\n') + len('    static let picker = """\n')
+    end = swift.index('\n    """', start)
+    lines = swift[start:end].split("\n")
+    body = "\n".join(line[4:] if line.startswith("    ") else line for line in lines)
+    # Swift's string escapes: only \\ is used, for the regular expressions' backslashes.
+    assert "\\(" not in body, "the picker grew a Swift interpolation"
+    body = body.replace("\\\\", "\\")
+    door = "  window.__officeVeil = {\n"
+    assert door in body, "Curtain.swift's picker changed shape"
+    body = body.replace(door, door +
+        "    describe: function (el) { return { selector: selectorFor(el), label: name(el), note: shape(el) }; },\n"
+        "    isOn: function () { return live; },\n", 1)
+    return ("// Hide Distracting Items' pointing mode: Veiling.picker in Sources/Roko/Curtain.swift\n"
+            "// (from Search by Office Commun, MIT), copied by build.py with describe() and isOn() added.\n"
+            + body + "\n")
+
+
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
@@ -293,6 +315,7 @@ def main():
 
     for name in ("cosmetic-filter.js", "consent-main.js", "consent-frame.js"):
         shutil.copy(LISTS / name, OUT / name)
+    (OUT / "picker.js").write_text(picker())
 
     manifest = json.loads((SRC / "manifest.json").read_text())
     manifest["version"] = (ROOT / "VERSION").read_text().strip()

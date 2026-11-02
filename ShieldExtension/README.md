@@ -13,9 +13,14 @@ Edge). It is built from the same files roko ships, so it blocks what roko blocks
 - **Hidden leftovers**: element hiding is served page by page, and ad boxes left empty are folded
   away.
 - **YouTube's ads**: taken out of the player's data, with a muted 16× fallback, as in roko.
+- **Hide Distracting Items**: Hide something… in the popup, ⌘⇧H, or Hide this in the right-click
+  menu. What you point at goes for good on that site and stays off as pages load. ⌘Z while pointing
+  brings back the last one, and Esc stops. The popup lists what's hidden: rest on a line to see that
+  thing outlined on the page, then Restore it. Private windows keep their hides for the tab only.
+  These are your own choices, so they stay whether Shield is on, off or paused.
 
-As in roko, it shows no counter. The toolbar's Eclipse is orange where Shield is on and grey
-where it is paused or off.
+As in roko, it shows no counter. The toolbar's Eclipse is black where Shield is on (light on a
+dark toolbar) and opens into a grey ring where it is paused or off.
 
 ## Install in Dia
 
@@ -26,6 +31,9 @@ python3 ShieldExtension/build.py
 1. Open `chrome://extensions` in Dia.
 2. Turn on Developer mode.
 3. Choose Load unpacked and pick `build/roko-shield`.
+
+⌘⇧H is only a suggestion: Chrome's `chrome://extensions/shortcuts` changes it, and the popup
+shows whichever key is set.
 
 If you have another blocker installed (Dia's uBlock Origin Lite, say), turn it off: two blockers
 block everything twice and break more sites.
@@ -42,6 +50,9 @@ block everything twice and break more sites.
 - `build_snippets.sh` rebuilds `src/consent-snippets.js`, Autoconsent's page steps (MPL-2.0), when
   roko's Autoconsent version changes.
 - `make_icons.py` draws the toolbar icons from roko's Eclipse.
+- Hide Distracting Items' pointing script is copied by `build.py` from `Curtain.swift` (Search's,
+  MIT), with `describe()` and `isOn()` added. `src/veils.js` puts hides back on before a page draws,
+  and `src/picker-keys.js` adds Esc, ⌘Z and the line at the foot of the page.
 - Shield's own list and the YouTube scripts are copied from `Shield.swift` and `YouTubeAds.swift`.
   When those change, update `build.py` and `src/youtube-*.js` to match.
 
@@ -59,7 +70,9 @@ The test runs a hidden Chromium against pages served from localhost. It checks t
 - empty ad boxes fold away, and boxes with real text stay;
 - a pop-up window to an ad site is closed;
 - a paused site loads untouched;
-- turning it off everywhere takes every list off.
+- turning it off everywhere takes every list off;
+- Hide Distracting Items hides what you point at, keeps it across a reload, undoes with ⌘Z, stops
+  with Esc, names what a right-click was over, and peeks and restores from the popup.
 
 ## Licences
 

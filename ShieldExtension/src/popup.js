@@ -1,5 +1,5 @@
-// The popup: Shield for the site you're on, the four kinds for every site,
-// and Shield itself. What it shows comes from the background (background.js),
+// The popup: Shield for the site you're on, what you have hidden there, the
+// four kinds for every site, and Shield itself. What it shows comes from the background (background.js),
 // which also makes every change, so the rules and this agree.
 
 const NAMES = { ads: "ads", privacy: "trackers", cookies: "cookie notices", popups: "pop-ups" };
@@ -76,13 +76,56 @@ function render() {
   $("cookies-why").textContent = ACCEPTED[accepted] || "";
 
   $("kinds").classList.toggle("resting", !on);
-  for (const row of document.querySelectorAll(".kind")) {
+  for (const row of document.querySelectorAll(".kind[data-kind]")) {
     const value = !!state.kinds[row.dataset.kind];
     row.setAttribute("aria-checked", String(value));
     row.tabIndex = on ? 0 : -1;
     setOpen(row.querySelector("[data-eclipse]"), !value);
   }
   $("foot").hidden = !on;
+  renderHidden();
+}
+
+// Hide Distracting Items: your own, kept whether Shield is on, off or paused.
+function renderHidden() {
+  const { site, hidden, shortcut } = view;
+  $("here").hidden = !site;
+  $("pick-key").textContent = shortcut || "";
+  const list = $("veils");
+  list.replaceChildren(...(hidden || []).map((veil) => {
+    const row = document.createElement("div");
+    row.className = "veil";
+    const what = document.createElement("span");
+    what.className = "what";
+    const label = document.createElement("span");
+    label.textContent = veil.label;
+    what.append(label);
+    if (veil.note) {
+      const note = document.createElement("span");
+      note.className = "note";
+      note.textContent = veil.note;
+      what.append(note);
+    }
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "inline";
+    back.textContent = "Restore";
+    back.setAttribute("aria-label", `Restore ${veil.label}`);
+    back.addEventListener("click", () => restore({ selector: veil.selector }));
+    const look = () => send("peek", { tabId: tab.id, selector: veil.selector });
+    row.addEventListener("mouseenter", look);
+    back.addEventListener("focus", look);
+    row.append(what, back);
+    return row;
+  }));
+  $("restore-all").hidden = (hidden || []).length < 2;
+}
+
+const send = (to, body) => chrome.runtime.sendMessage({ to, body });
+
+async function restore(which) {
+  await send("restore", { tabId: tab.id, ...which });
+  await load();
 }
 
 async function load() {
@@ -117,7 +160,18 @@ $("reject").addEventListener("click", () => {
   change({ accepted }, { reload: true });
 });
 
-for (const row of document.querySelectorAll(".kind")) {
+$("pick").addEventListener("click", async () => {
+  // Out of the way, so the page can be pointed at.
+  if (await send("pick", { tabId: tab.id })) window.close();
+});
+$("restore-all").addEventListener("click", () => restore({ all: true }));
+// Leaving the list puts the page back the way it was.
+$("veils").addEventListener("mouseleave", () => send("peek", { tabId: tab.id, selector: null }));
+$("veils").addEventListener("focusout", (event) => {
+  if (!$("veils").contains(event.relatedTarget)) send("peek", { tabId: tab.id, selector: null });
+});
+
+for (const row of document.querySelectorAll(".kind[data-kind]")) {
   row.addEventListener("click", () => {
     const kind = row.dataset.kind;
     change({ kinds: { [kind]: !view.state.kinds[kind] } });
