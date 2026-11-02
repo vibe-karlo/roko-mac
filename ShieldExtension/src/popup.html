@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>roko Shield</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header class="site">
+      <span class="mark" data-eclipse="32"></span>
+      <div class="said">
+        <h1 id="site">This page</h1>
+        <p id="status"></p>
+      </div>
+    </header>
+
+    <p class="cookies" id="cookies" hidden>
+      <span id="cookies-why"></span>
+      <button class="inline" id="reject" type="button">Reject instead</button>
+    </p>
+
+    <button class="primary" id="pause" type="button" hidden></button>
+
+    <section class="kinds" id="kinds" aria-labelledby="kinds-title">
+      <p class="group" id="kinds-title">On every site</p>
+      <button class="kind" type="button" role="switch" data-kind="ads"><span>Ads</span><span data-eclipse="18"></span></button>
+      <button class="kind" type="button" role="switch" data-kind="privacy"><span>Trackers</span><span data-eclipse="18"></span></button>
+      <button class="kind" type="button" role="switch" data-kind="cookies"><span>Cookie notices</span><span data-eclipse="18"></span></button>
+      <button class="kind" type="button" role="switch" data-kind="popups"><span>Pop-ups and nags</span><span data-eclipse="18"></span></button>
+    </section>
+
+    <footer id="foot">
+      <button class="quiet" id="master" type="button">Turn off everywhere</button>
+    </footer>
+  </main>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

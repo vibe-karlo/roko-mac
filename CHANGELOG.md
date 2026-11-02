@@ -80,6 +80,8 @@ Newest first.
 - Drag a tab to the side of its page to split it with the one before; a tab carried out of its
   row follows the pointer as a card.
 - "Add to roko" on the Chrome Web Store.
+- roko Shield: roko's blocking as a Chrome extension for Dia or any other Chromium browser, built
+  from the same lists ([ShieldExtension](ShieldExtension/README.md)).
 - roko's blocking, as on iPhone: ads, trackers, cookie notices (answered with "reject") and
   annoyances, as WebKit content rules.
 

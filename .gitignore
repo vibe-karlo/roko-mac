@@ -13,3 +13,6 @@ __pycache__/
 *.provisionprofile
 *.p12
 *.mobileprovision
+
+# The extension test's playwright-core (ShieldExtension/test.mjs).
+node_modules

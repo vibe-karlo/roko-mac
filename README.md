@@ -29,6 +29,8 @@ kept in step between the two.
 - **Passwords** in the macOS keychain, imported from Chrome, Arc, Dia, Brave or Edge.
 - **Chrome extensions** on WebKit's own extension engine.
 - **An app icon of your choice**, kept in the Dock after quitting.
+- **roko Shield for Dia**: the same blocking as a Chrome extension, for Dia or any other Chromium
+  browser ([ShieldExtension](ShieldExtension/README.md)).
 
 The [changelog](CHANGELOG.md) lists everything that has changed since roko split from Search.
 
