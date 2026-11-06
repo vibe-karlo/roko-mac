@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Builds roko Shield, roko's blocking as a Chrome extension (for Dia, Chrome,
-Arc, Brave or any other Chromium browser), from the very lists roko ships:
+Arc, Brave or any other Chromium browser), from what roko on iPhone ships.
+pull_lists.sh copies that from the iOS repository into lists/; this turns it:
 
-  Resources/Blocking/<kind>.json       WebKit content rules  -> rules/<kind>.json
-  Resources/Blocking/<kind>-hosts.txt  blocked hosts          -> the same rule file
-  Resources/Blocking/<kind>-hide.txt   element hiding         -> hide/<kind>.json
-  Resources/Blocking/*.js              the page scripts, as they are
+  lists/<kind>.json       WebKit content rules  -> rules/<kind>.json
+  lists/<kind>-hosts.txt  blocked hosts         -> the same rule file
+  lists/<kind>-hide.txt   element hiding        -> hide/<kind>.json
+  lists/site-scripts.*    uBlock Origin's site rules -> site-scripts/*.js
+  lists/*.js              the page scripts, as they are
 
 Chrome's rules (declarativeNetRequest) say what WebKit's say in a simpler
 pattern language. Each WebKit pattern is rewritten into it where it can be;
@@ -20,14 +22,24 @@ import json
 import re
 import shutil
 import sys
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LISTS = ROOT / "Resources" / "Blocking"
-SRC = Path(__file__).resolve().parent / "src"
+HERE = Path(__file__).resolve().parent
+LISTS = HERE / "lists"
+SRC = HERE / "src"
 OUT = ROOT / "build" / "roko-shield"
 
 KINDS = ["ads", "privacy", "cookies", "popups"]
+SITE_SHARDS = 32
+
+# A block rule's and an exception's priority, per list. WebKit's lists can be
+# taken off one site at a time; Chrome's can't, but a site's rule of a higher
+# priority beats everything below it, so the lists are stacked in the order they
+# come off (background.js): cookies for a site that's accepted them, then ads
+# for a site that shows nothing without them. Trackers and pop-ups stay on top.
+PRIORITY = {"cookies": (1, 2), "shield": (4, 5), "ads": (4, 5), "privacy": (7, 8), "popups": (7, 8)}
 MOST_PATTERNS = 1000          # Chrome's regexFilter limit per list
 HOSTS_PER_RULE = 4000
 
@@ -176,7 +188,7 @@ class Ruleset:
     def add(self, condition, allow):
         self.rules.append({
             "id": len(self.rules) + 1,
-            "priority": 2 if allow else 1,
+            "priority": PRIORITY[self.name][1 if allow else 0],
             "action": {"type": "allow" if allow else "block"},
             "condition": condition,
         })
@@ -274,6 +286,60 @@ def picker():
             + body + "\n")
 
 
+def site_scripts():
+    """uBlock Origin's site rules, as roko's site-scripts.js runs them. SiteScripts
+    in the iOS app looks a site up in one table as a tab navigates; a page's script
+    has to be there before the page runs, so here the table is cut up and each piece
+    goes in with the engine, loaded by Chrome itself only on the sites it names.
+
+    "name.*" (any ending) can't be a Chrome match pattern, so those rules are one
+    file that runs on every page, and stops at once on a site that isn't one."""
+    engine = (LISTS / "site-scripts.js").read_text(encoding="utf-8")
+    assert "__ROKO_CALLS__" in engine, "site-scripts.js changed shape"
+    named = [{} for _ in range(SITE_SHARDS)]
+    wild = {}
+    for line in (LISTS / "site-scripts.txt").read_text(encoding="utf-8").split("\n"):
+        key, _, calls = line.partition("\t")
+        if not calls:
+            continue
+        if key.endswith(".*"):
+            wild[key] = calls
+        else:
+            named[zlib.crc32(key.encode()) % SITE_SHARDS][key] = calls
+
+    def script(rows):
+        # The names first, as one string: on a page that isn't listed (every page,
+        # for any.js) nothing else is built before it stops.
+        names = "|" + "|".join(sorted(rows)) + "|"
+        table = ",".join(f"{json.dumps(key)}:{calls}" for key, calls in sorted(rows.items()))
+        return ("(() => {\n"
+                f"  const names = {json.dumps(names)};\n"
+                '  const found = [], labels = location.hostname.toLowerCase().split(".");\n'
+                '  const look = (key) => { if (names.includes("|" + key + "|")) found.push(key); };\n'
+                "  for (let start = 0; start < labels.length - 1; start++) {\n"
+                "    const suffix = labels.slice(start);\n"
+                '    look(suffix.join("."));\n'
+                '    for (const cut of [1, 2]) if (suffix.length > cut) look(suffix.slice(0, -cut).join(".") + ".*");\n'
+                "  }\n"
+                "  if (!found.length) return;\n"
+                f"  const table = {{{table}}};\n"
+                "  const calls = found.flatMap((key) => table[key]);\n"
+                + engine.replace("__ROKO_CALLS__", "calls") +
+                "})();\n")
+
+    out = OUT / "site-scripts"
+    out.mkdir(parents=True, exist_ok=True)
+    shards = []
+    for index, rows in enumerate(named):
+        if not rows:
+            continue
+        (out / f"{index}.js").write_text(script(rows), encoding="utf-8")
+        shards.append({"js": f"site-scripts/{index}.js", "matches": [f"*://*.{key}/*" for key in sorted(rows)]})
+    (out / "any.js").write_text(script(wild), encoding="utf-8")
+    write_json(out / "shards.json", shards)
+    return sum(len(rows) for rows in named), len(wild)
+
+
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
@@ -300,11 +366,6 @@ def main():
     for rules in rulesets:
         write_json(OUT / "rules" / f"{rules.name}.json", rules.rules)
     write_json(OUT / "rules" / "popup-windows.json", popups)
-    # The consent platforms' hosts, let through again on a site that only
-    # works with its cookies accepted (ConsentHandler's "accepted" sites).
-    write_json(OUT / "rules" / "consent-hosts.json",
-               sorted({d for d in map(domain, (LISTS / "cookies-hosts.txt").read_text().split()) if d}))
-
     css = ",\n".join(SLOTS) + " { display: none !important; }\n"
     (OUT / "slots.css").write_text(css)
     sites = []
@@ -315,6 +376,12 @@ def main():
 
     for name in ("cosmetic-filter.js", "consent-main.js", "consent-frame.js"):
         shutil.copy(LISTS / name, OUT / name)
+    # The frames that can hold a cookie pop-up, in the small script that asks for the rules.
+    gate = (LISTS / "consent-frame-gate.json").read_text(encoding="utf-8").strip()
+    load = (SRC / "consent-load.js").read_text(encoding="utf-8")
+    assert "__FRAME_GATE__" in load
+    (OUT / "consent-load.js").write_text(load.replace("__FRAME_GATE__", gate), encoding="utf-8")
+    sites_named, sites_wild = site_scripts()
     (OUT / "picker.js").write_text(picker())
 
     manifest = json.loads((SRC / "manifest.json").read_text())
@@ -333,6 +400,8 @@ def main():
               f"{', pop-up rules ' + str(len(rules.popups)) if rules.popups else ''}"
               f"{'; left out: ' + lost if lost else ''}")
     print(f"  {total} rules in all (Chrome guarantees 30,000)")
+    print(f"  site rules: {sites_named} named sites, {sites_wild} under any ending")
+    print(f"  lists version {(LISTS / 'version.txt').read_text().strip()}")
     if total > 30000:
         sys.exit("Too many rules for Chrome's guaranteed share.")
 

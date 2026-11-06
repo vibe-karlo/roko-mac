@@ -2,7 +2,7 @@
 // four kinds for every site, and Shield itself. What it shows comes from the background (background.js),
 // which also makes every change, so the rules and this agree.
 
-const NAMES = { ads: "ads", privacy: "trackers", cookies: "cookie notices", popups: "pop-ups" };
+const NAMES = { ads: "ads", privacy: "trackers", cookies: "cookie notices", popups: "pop\u2011ups" };
 const ACCEPTED = {
   wall: "Cookies accepted here: the site won't open without them.",
   content: "Cookies accepted here: the site held the page back without them.",
@@ -41,10 +41,10 @@ function list(words) {
 }
 
 function render() {
-  const { state, site, paused, accepted } = view;
+  const { state, site, paused, accepted, adsAllowed } = view;
   const on = state.on;
   const here = on && site && !paused;
-  const kinds = Object.keys(NAMES).filter((k) => state.kinds[k]);
+  const kinds = Object.keys(NAMES).filter((k) => state.kinds[k] && !(k === "ads" && adsAllowed));
 
   $("site").textContent = site || "This page";
   let status;
@@ -74,6 +74,7 @@ function render() {
 
   $("cookies").hidden = !(here && accepted && state.kinds.cookies);
   $("cookies-why").textContent = ACCEPTED[accepted] || "";
+  $("ads").hidden = !(here && adsAllowed && state.kinds.ads);
 
   $("kinds").classList.toggle("resting", !on);
   for (const row of document.querySelectorAll(".kind[data-kind]")) {
@@ -158,6 +159,13 @@ $("reject").addEventListener("click", () => {
   const accepted = { ...view.state.accepted };
   delete accepted[view.site];
   change({ accepted }, { reload: true });
+});
+
+// Blocked again, and kept that way, whatever the page then does about it.
+$("block-ads").addEventListener("click", () => {
+  const { state, site } = view;
+  const others = (list) => list.filter((entry) => !(site === entry || site.endsWith("." + entry)));
+  change({ adsAllowed: others(state.adsAllowed), softAds: others(state.softAds), adsKept: [...state.adsKept, site] }, { reload: true });
 });
 
 $("pick").addEventListener("click", async () => {

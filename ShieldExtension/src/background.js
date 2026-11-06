@@ -9,16 +9,24 @@
 //   accepted  sites whose cookies are accepted, and why: "wall" (rejecting
 //             didn't get past the pop-up), "content" (the page held content
 //             back until they were)
+//   softAds   sites that show nothing while their ads are blocked, tried with
+//             their ad scripts let through (ContentBlocker.pageRefusedToShow)
+//   adsAllowed  sites where that wasn't enough: their ads are let through
+//   adsKept   sites you asked to keep blocking ads on regardless
 //
 // Chrome's network rules are the lists build.py made (rules/*.json), switched
-// on and off as whole lists; a paused site gets one rule that lets its pages
-// through; the page scripts are registered only while they are wanted and
-// never on a paused site, as roko only gives a tab the scripts it should run.
+// on and off as whole lists. One site can't have a list taken off, so a rule for
+// that site is given a priority above the lists it lets through (build.py's
+// PRIORITY). The page scripts are registered only while they are wanted and never
+// on a paused site, as roko only gives a tab the scripts it should run.
 
 import { snippets } from "./consent-snippets.js";
 
 const KINDS = ["ads", "privacy", "cookies", "popups"];
-const DEFAULTS = { on: true, kinds: { ads: true, privacy: true, cookies: true, popups: true }, paused: [], accepted: {} };
+const DEFAULTS = {
+  on: true, kinds: { ads: true, privacy: true, cookies: true, popups: true }, paused: [], accepted: {},
+  softAds: [], adsAllowed: [], adsKept: [],
+};
 // YouTubeAds.hosts: exact hosts, since accounts.youtube.com and the like have no player.
 const YOUTUBE = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
   "youtube-nocookie.com", "www.youtube-nocookie.com"];
@@ -48,10 +56,9 @@ function siteOf(url) {
   }
 }
 
-/** Off for this site, or for the site it is part of. */
-function isPaused(state, site) {
-  return !!site && state.paused.some((paused) => site === paused || site.endsWith("." + paused));
-}
+/** This site is in the list, or the site it is part of is. */
+const listed = (list, site) => !!site && list.some((entry) => site === entry || site.endsWith("." + entry));
+const isPaused = (state, site) => listed(state.paused, site);
 
 function acceptance(state, site) {
   return site ? state.accepted[site] ?? null : null;
@@ -73,7 +80,7 @@ function file(path) {
 
 // MARK: Lists and scripts
 
-async function apply(state) {
+async function apply(state, force = false) {
   state = state || (await settings());
   const enable = [], disable = [];
   for (const id of ["shield", ...KINDS]) {
@@ -82,55 +89,79 @@ async function apply(state) {
   await chrome.declarativeNetRequest.updateEnabledRulesets({ enableRulesetIds: enable, disableRulesetIds: disable });
 
   const rules = [];
-  for (const site of state.paused) {
-    rules.push({
-      id: rules.length + 1, priority: 100, action: { type: "allowAllRequests" },
-      condition: { requestDomains: [site], resourceTypes: ["main_frame", "sub_frame"] },
-    });
-  }
-  // A site that only works with its cookies accepted gets its consent
-  // platform back: the cookie list blocks many of them, and a blocked one
-  // can't be accepted. Its notice is still answered, with accept.
+  const frames = ["main_frame", "sub_frame"];
+  const pass = (priority, sites) => rules.push({
+    id: rules.length + 1, priority, action: { type: "allowAllRequests" },
+    condition: { requestDomains: sites, resourceTypes: frames },
+  });
+  for (const site of state.paused) pass(100, [site]);
+  // A site that needs its cookies accepted gets its consent platform back: the
+  // cookie list blocks many of them, and a blocked one can't be accepted. Its
+  // notice is still answered, with accept. Above the cookie list only.
   const accepted = Object.keys(state.accepted);
-  const consentHosts = await file("rules/consent-hosts.json");
-  if (accepted.length && consentHosts?.length) {
+  if (accepted.length) pass(3, accepted);
+  // A page that shows nothing while its ads are blocked. First its ad scripts and
+  // their requests, which is usually all an anti-adblock checks, while the ads'
+  // pictures, frames and videos stay blocked; then its ads. Above the ad lists:
+  // trackers and pop-ups stay handled, and its cookie notice is still answered.
+  if (state.softAds.length) {
     rules.push({
-      id: rules.length + 1, priority: 3, action: { type: "allow" },
-      condition: { initiatorDomains: accepted, requestDomains: consentHosts },
+      id: rules.length + 1, priority: 6, action: { type: "allow" },
+      condition: { initiatorDomains: state.softAds, resourceTypes: ["script", "xmlhttprequest"] },
     });
   }
+  if (state.adsAllowed.length) pass(6, state.adsAllowed);
   const old = await chrome.declarativeNetRequest.getDynamicRules();
   await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: old.map((r) => r.id), addRules: rules });
-  await register(state);
+  await register(state, force);
   await showIcons();
 }
 
-async function register(state) {
-  const excluded = state.paused.flatMap((site) => [`*://${site}/*`, `*://*.${site}/*`]);
+async function register(state, force = false) {
+  const paused = state.paused.flatMap((site) => [`*://${site}/*`, `*://*.${site}/*`]);
   const everywhere = { matches: ["http://*/*", "https://*/*"], runAt: "document_start", persistAcrossSessions: true };
-  if (excluded.length) everywhere.excludeMatches = excluded;
+  if (paused.length) everywhere.excludeMatches = paused;
+  // What's only there because a site's ads are blocked goes where they aren't.
+  const adSites = { ...everywhere };
+  const adsLetThrough = state.adsAllowed.flatMap((site) => [`*://${site}/*`, `*://*.${site}/*`]);
+  if (paused.length || adsLetThrough.length) adSites.excludeMatches = [...paused, ...adsLetThrough];
   const scripts = [];
   if (state.on) {
     // Cookie notices are answered, not just hidden: hidden, a site keeps
-    // asking, and often keeps the page locked or its content held back.
+    // asking, and often keeps the page locked or its content held back. Only
+    // this much at the start: it asks for the rules itself (consent-load.js).
     if (state.kinds.cookies) {
-      scripts.push({ ...everywhere, id: "consent-main", js: ["bridge.js", "consent-main.js"], allFrames: false });
-      scripts.push({ ...everywhere, id: "consent-frame", js: ["bridge.js", "consent-frame.js"], allFrames: true });
+      scripts.push({ ...everywhere, id: "consent-load", js: ["consent-load.js"], runAt: "document_end", allFrames: true });
     }
     if (state.kinds.ads || state.kinds.cookies || state.kinds.popups) {
       scripts.push({ ...everywhere, id: "hiding", js: ["bridge.js", "cosmetic-filter.js"], allFrames: false });
     }
-    scripts.push({ ...everywhere, id: "slots", css: ["slots.css"], allFrames: true });
+    scripts.push({ ...adSites, id: "slots", css: ["slots.css"], allFrames: true });
     for (const [index, entry] of ((await file("slots-by-site.json")) || []).entries()) {
       const matches = entry.sites.flatMap((site) => [`*://${site}/*`, `*://*.${site}/*`]);
-      scripts.push({ ...everywhere, id: `slots-${index}`, css: [entry.css], matches, allFrames: true });
+      scripts.push({ ...adSites, id: `slots-${index}`, css: [entry.css], matches, allFrames: true });
     }
-    const youtube = { ...everywhere, matches: YOUTUBE.map((host) => `*://${host}/*`), allFrames: true };
+    const youtube = { ...adSites, matches: YOUTUBE.map((host) => `*://${host}/*`), allFrames: true };
     scripts.push({ ...youtube, id: "youtube-page", js: ["youtube-page.js"], world: "MAIN" });
     scripts.push({ ...youtube, id: "youtube-skip", js: ["youtube-skip.js"] });
+    // uBlock Origin's site rules, so a site's anti-adblock never comes up: before
+    // the page runs, in its own world, and only where its ads are blocked (it's
+    // what their absence brings on). Each file loads only on the sites it names.
+    if (state.kinds.ads) {
+      const main = { ...adSites, world: "MAIN", allFrames: false };
+      scripts.push({ ...main, id: "site-any", js: ["site-scripts/any.js"] });
+      for (const [index, shard] of ((await file("site-scripts/shards.json")) || []).entries()) {
+        scripts.push({ ...main, id: `site-${index}`, js: [shard.js], matches: shard.matches });
+      }
+    }
   }
+  // Thousands of addresses: not done again for a change that doesn't touch them.
+  const signature = JSON.stringify(scripts);
+  const { registered } = await chrome.storage.local.get("registered");
+  if (!force && registered === signature) return;
   await chrome.scripting.unregisterContentScripts();
   if (scripts.length) await chrome.scripting.registerContentScripts(scripts);
+  await chrome.storage.local.set({ registered: signature });
 }
 
 // The toolbar's mark: black where Shield is on for the page (light on a dark
@@ -161,7 +192,7 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.url || info.status === "loading") showIcon(tabId, tab.url);
 });
 
-chrome.runtime.onInstalled.addListener(() => { apply(); menus(); });
+chrome.runtime.onInstalled.addListener(() => { apply(null, true); menus(); });
 chrome.runtime.onStartup.addListener(() => apply());
 
 // MARK: Element hiding (CosmeticFilter)
@@ -175,11 +206,37 @@ function index(kind) {
 }
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key) ? object[key] : [];
 
+/**
+ * A site shows nothing while its ads are blocked. Two steps, each followed by a
+ * reload, and each only if the last wasn't enough: its ad scripts may load, then,
+ * since a page beats a blocked ad, its ads are let through, here only.
+ */
+async function pageRefused(tab) {
+  const state = await settings();
+  const site = siteOf(tab.url);
+  if (!site || !state.on || !state.kinds.ads || isPaused(state, site)) return;
+  if (listed(state.adsAllowed, site) || listed(state.adsKept, site)) return;
+  if (listed(state.softAds, site)) {
+    await change({ softAds: state.softAds.filter((s) => s !== site), adsAllowed: [...state.adsAllowed, site] });
+  } else {
+    await change({ softAds: [...state.softAds, site] });
+  }
+  await chrome.tabs.reload(tab.id);
+}
+
 async function cosmetic(body, sender) {
-  if (!body || !Array.isArray(body.keys) || !sender.tab) return null;
+  if (!body || !sender.tab) return null;
+  // The page script found and hid a site's own "disable your ad blocker" wall.
+  if (body.wall) return null;
+  if (body.refused) {
+    if (sender.frameId === 0) await pageRefused(sender.tab);
+    return null;
+  }
+  if (!Array.isArray(body.keys)) return null;
   const state = await settings();
   const host = String(body.host || "").toLowerCase();
-  if (!state.on || isPaused(state, siteOf(sender.tab.url) || host)) return null;
+  const here = siteOf(sender.tab.url) || host;
+  if (!state.on || isPaused(state, here)) return null;
   const hosts = suffixes(host);
   const first = !!body.first;
   const selectors = [];
@@ -190,7 +247,7 @@ async function cosmetic(body, sender) {
   const overlays = [];
   let collapseAds = false;
   for (const kind of KINDS) {
-    if (!state.kinds[kind]) continue;
+    if (!state.kinds[kind] || (kind === "ads" && listed(state.adsAllowed, here))) continue;
     const list = await index(kind);
     if (!list || hosts.some((h) => list.untouched.has(h))) continue;
     if (kind === "ads") collapseAds = true;
@@ -239,6 +296,14 @@ async function consent(body, sender) {
   if (!state.on || !state.kinds.cookies || !site || isPaused(state, site)) return null;
 
   switch (body.type) {
+    case "rokoLoad":
+      // The rules, asked for by consent-load.js once the page is ready for them.
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [sender.frameId] },
+        files: ["bridge.js", sender.frameId === 0 ? "consent-main.js" : "consent-frame.js"],
+      }).catch(() => {});
+      return null;
+
     case "popupFound":
       return { type: acceptance(state, site) ? "optIn" : "optOut" };
 
@@ -250,6 +315,9 @@ async function consent(body, sender) {
 
     case "rokoWall":
       await accept(site, "wall");
+      // A wall answered by its buttons: a page that was held back behind it
+      // (BILD's) often doesn't fill in until it's loaded with consent.
+      if (body.cmp === "roko-paid-wall") setTimeout(() => fillIn(tab.id, tab.url, site), 3000);
       return { type: "optIn" };
 
     case "rokoBlocked": {
@@ -275,6 +343,13 @@ async function consent(body, sender) {
     default:
       return null;
   }
+}
+
+async function fillIn(tabId, url, site) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab || tab.url !== url) return;
+  const words = await inPage(tabId, 0, () => (document.body ? document.body.innerText.length : 0));
+  if (typeof words === "number" && words < 1200) await recover(tab, site);
 }
 
 /**
@@ -588,7 +663,7 @@ async function popupState(body) {
   const site = siteOf(body.url);
   const shortcut = (await chrome.commands.getAll()).find((c) => c.name === "hide-items")?.shortcut || "";
   return { state, site, paused: isPaused(state, site), accepted: acceptance(state, site),
-    hidden: await veilsOn(site), shortcut };
+    adsAllowed: listed(state.adsAllowed, site), hidden: await veilsOn(site), shortcut };
 }
 
 const handlers = {

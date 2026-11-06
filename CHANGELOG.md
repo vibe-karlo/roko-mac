@@ -84,6 +84,9 @@ Newest first.
   from the same lists ([ShieldExtension](ShieldExtension/README.md)).
   It has Hide Distracting Items too: point at anything, or right-click it, and it stays gone on
   that site.
+  It now carries what roko on iPhone learned: anti-adblock and pay-or-consent walls go, a page that
+  refuses to show gets its ads back a step at a time, and uBlock Origin's site rules stop walls
+  before they start. Because of those rules, Shield as a whole is GPL-3.0.
 - roko's blocking, as on iPhone: ads, trackers, cookie notices (answered with "reject") and
   annoyances, as WebKit content rules.
 
