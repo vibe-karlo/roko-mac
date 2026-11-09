@@ -69,11 +69,15 @@
   // Scripts the parser is reading: an observer sees each before it runs.
   const nodeText = (nodeName, change) => {
     const wanted = pattern(nodeName.startsWith("/") ? nodeName : `/^${nodeName.replace(/[^\w-]/g, "")}$/i`);
+    // A script changed once is left alone after: writing its text back is itself a change the
+    // observer sees, and a replacement that keeps what it matched ("…$1", daily.co.jp's) would
+    // match again, forever, freezing the page.
+    const done = new WeakSet();
     const look = (node) => {
-      if (node.nodeType !== 1 || !wanted.test(node.nodeName) || !node.firstChild) return;
+      if (node.nodeType !== 1 || done.has(node) || !wanted.test(node.nodeName) || !node.firstChild) return;
       const before = node.textContent;
       const after = change(before);
-      if (after !== before) node.textContent = after;
+      if (after !== before) { done.add(node); node.textContent = after; }
     };
     const observer = new MutationObserver((records) => {
       for (const record of records) {
@@ -234,10 +238,17 @@
       const matches = needle(want);
       nodeText(nodeName, (body) => (matches(body) ? "" : body));
     },
-    rpnt: (nodeName, want = "", replacement = "") => {
+    rpnt: (nodeName, want = "", replacement = "", ...extra) => {
       const re = pattern(want);
       const global = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
-      nodeText(nodeName, (body) => body.replace(global, replacement));
+      // "sedCount", n: at most n replacements in a script, as uBlock Origin does.
+      const at = extra.indexOf("sedCount");
+      const limit = at >= 0 ? parseInt(extra[at + 1], 10) || 0 : 0;
+      nodeText(nodeName, (body) => {
+        if (!limit) return body.replace(global, replacement);
+        let count = 0;
+        return body.replace(global, (...args) => (count++ < limit ? args[0].replace(new RegExp(re.source, re.flags.replace("g", "")), replacement) : args[0]));
+      });
     },
     ra: (names = "", selector = "[" + names + "]") => {
       const list = names.split(/\s*\|\s*/).filter(Boolean);

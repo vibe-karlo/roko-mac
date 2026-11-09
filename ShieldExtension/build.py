@@ -223,6 +223,14 @@ class Ruleset:
             cond["regexFilter"] = pattern
         self.add(cond, allow)
 
+    def opened_pages_allowed(self):
+        """A page you open yourself is never blocked, even an ad or tracking company's own
+        site (ContentBlocker.swift): the page you went to, and its own frames. Their ads and
+        frames on other sites stay blocked. Above this list's own blocks, as WebKit's last
+        exception is."""
+        self.add({"resourceTypes": ["main_frame"]}, allow=True)
+        self.add({"resourceTypes": ["sub_frame"], "domainType": "firstParty"}, allow=True)
+
     def hosts(self, names):
         names = sorted({d for d in map(domain, names) if d})
         for start in range(0, len(names), HOSTS_PER_RULE):
@@ -364,6 +372,7 @@ def main():
         write_json(OUT / "hide" / f"{kind}.json", hide_index((LISTS / f"{kind}-hide.txt").read_text(encoding="utf-8")))
 
     for rules in rulesets:
+        rules.opened_pages_allowed()
         write_json(OUT / "rules" / f"{rules.name}.json", rules.rules)
     write_json(OUT / "rules" / "popup-windows.json", popups)
     css = ",\n".join(SLOTS) + " { display: none !important; }\n"

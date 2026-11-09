@@ -4,7 +4,8 @@ roko's blocking as a Chrome extension, for Dia or any other Chromium browser (Ch
 Edge). It is built from what roko on iPhone ships, so it blocks what roko blocks:
 
 - **Ads and trackers**: EasyList, EasyPrivacy and Shield's own short list, as Chrome's network
-  rules.
+  rules. A page you open yourself is never blocked, even an ad company's own site; its ads elsewhere
+  are.
 - **Cookie notices**: answered with "reject" by roko's cookie script (DuckDuckGo's Autoconsent),
   which loads after the page rather than before it. A site that won't open without cookies, or holds
   the page back, gets them accepted, and so does a wall whose only other way past is a subscription,
@@ -79,6 +80,9 @@ block everything twice and break more sites.
 npm i playwright-core && npx playwright-core install chromium
 node ShieldExtension/test.mjs
 ```
+
+If Playwright's own Chromium is a different build from the one on this Mac, point `CHROMIUM` at the
+one there.
 
 The test runs a hidden Chromium against pages served from this machine. It checks that:
 

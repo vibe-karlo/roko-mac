@@ -320,6 +320,21 @@ async function consent(body, sender) {
       if (body.cmp === "roko-paid-wall") setTimeout(() => fillIn(tab.id, tab.url, site), 3000);
       return { type: "optIn" };
 
+    case "rokoFrameYes": {
+      // A frame that is only a yes to cookies: pressed when the page around it is a wall
+      // whose other way past costs money, as for a wall's yes on the page itself.
+      if (sender.frameId === 0) return { press: false };
+      if (acceptance(state, site)) return { press: true };
+      let frameHost = "";
+      try { frameHost = new URL(sender.url).host; } catch (e) {}
+      if (!(await inPage(tab.id, 0, wallAround, [frameHost]))) return { press: false };
+      await accept(site, "wall");
+      return { press: true };
+    }
+
+    case "rokoSaved":
+      return null;
+
     case "rokoBlocked": {
       if (!acceptance(state, site)) await accept(site, "content");
       // Through the platform's own API first: the content usually comes back
@@ -343,6 +358,28 @@ async function consent(body, sender) {
     default:
       return null;
   }
+}
+
+// Whether the page is a wall a frame's yes belongs to: a short page about cookies whose
+// other way past is paying (El Confidencial's /consent), or a big frame from the same
+// place pinned over the page, holding the choices. Runs in the page.
+function wallAround(frameHost) {
+  const text = document.body ? document.body.innerText || "" : "";
+  const pay = /subscri|suscri|abonn|abbon|\babo\b|\bpay\b|\bpaga|\bpago\b|bezahl|pretplat|assin|ad[- ]?free|werbefrei|sans pub|sin (anuncios|publi)|senza pubbl|contentpass/i;
+  if (text.length < 4000 && /cookie/i.test(text) && pay.test(text)) return true;
+  const pinned = (el) => {
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      const p = getComputedStyle(node).position;
+      if (p === "fixed" || p === "sticky") return true;
+    }
+    return false;
+  };
+  return [...document.querySelectorAll("iframe")].some((f) => {
+    let from = "";
+    try { from = new URL(f.src, location.href).host; } catch (e) {}
+    const r = f.getBoundingClientRect();
+    return from === frameHost && r.width >= innerWidth * 0.6 && r.height >= innerHeight * 0.5 && pinned(f);
+  });
 }
 
 async function fillIn(tabId, url, site) {

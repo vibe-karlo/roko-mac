@@ -123,6 +123,36 @@
   // Sites often lock scrolling a moment after the pop-up would have appeared.
   for (const delay of [800, 2500, 6000]) setTimeout(() => overlays.length && unlockIfNeeded(), delay);
 
+  // A lock that outlives its pop-up, whoever answered it: People's stylesheet locks the page for as
+  // long as OneTrust's box says show-banner, which it goes on saying after the answer. Nothing is
+  // up and the page is long, but it won't move. Only while you haven't touched the page (a menu you
+  // opened may lock it on purpose), and not with anything big over it, in or out of the way. A
+  // page that scrolls inside itself has nothing past the screen here, so it isn't touched.
+  let touched = false;
+  addEventListener("pointerdown", () => { touched = true; }, { capture: true, passive: true, once: true });
+  const overTheContent = () => {
+    for (const share of [0.3, 0.5, 0.7]) {
+      let el = document.elementFromPoint(innerWidth / 2, innerHeight * share);
+      for (; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+        if (el.offsetHeight < innerHeight * 0.3) continue;
+        const s = getComputedStyle(el);
+        if (s.position === "fixed" || s.position === "sticky" && el.offsetHeight < innerHeight * 1.2) return true;
+        if (s.position === "absolute" && parseInt(s.zIndex) >= 10) return true;
+        if (el.getAttribute("aria-modal") === "true" || el.tagName === "DIALOG") return true;
+      }
+    }
+    return false;
+  };
+  const freeIfStranded = () => {
+    const root = document.documentElement, body = document.body;
+    if (touched || !body || (!isLocked(root) && !isLocked(body))) return;
+    if (Math.max(root.scrollHeight, body.scrollHeight) < innerHeight * 1.5 || overTheContent()) return;
+    unlock();
+  };
+  const armStranded = () => { for (const delay of [1500, 4000, 8000, 13000]) setTimeout(freeIfStranded, delay); };
+  if (document.readyState === "complete") armStranded();
+  else addEventListener("load", armStranded, { once: true });
+
   // "Get our app" banners (smartbanner.js, on countless sites) push the page
   // down by their height and note the margin they replaced. Hidden, the banner
   // leaves that push behind as an empty band at the top: put the margin back.
@@ -235,6 +265,39 @@
     }
     if (shift) window.scrollBy(0, -shift);
     foldAdStrips();
+    foldLabelledTeasers();
+  };
+
+  // A teaser the site itself marks as paid ("Anzeige", "Sponsored", "REKLAMA"): served from the
+  // site's own address, so no list can block it (Spiegel's, Focus's from Burda's own server, WP's,
+  // Kurier's). Only a teaser: a picture, a link or a few, and a short title beside the label. Never
+  // in a menu, header or footer, and a label that is a link (Kurier's "Werbung") only on a teaser
+  // with few links: a menu's "Reklama" sits among many.
+  const PAID = /^(anzeige|werbung|sponsored|sponsored content|gesponsert|advertorial|paid content|paid post|promoted|publicidad|patrocinado|publicité|sponsoris[ée]|pubblicità|sponsorizzato|reklama|reklám|hirdetés|oglas|sponzorirano|inzerce|реклама|advertentie|gesponsord|annonce|annons|mainos|advertisement)$/i;
+  const NOT_A_TEASER = "header, nav, footer, [role=navigation], [role=banner], [role=contentinfo], aside[role=complementary] > nav";
+  const foldLabelledTeasers = () => {
+    for (const label of document.querySelectorAll("body span, body div, body p, body small, body em, body strong, body b, body i, body li, body a")) {
+      if (label.childElementCount || label.hasAttribute(MARK) || label.closest(`[${MARK}]`)) continue;
+      const text = (label.textContent || "").trim();
+      if (text.length > 22 || !PAID.test(text)) continue;
+      if (label.closest(NOT_A_TEASER) || !label.getClientRects().length) continue;
+      let box = label;
+      for (let i = 0; i < 6 && box.parentElement && !NEVER.has(box.parentElement.tagName); i++) {
+        box = box.parentElement;
+        if (box.offsetHeight >= 100) break;
+      }
+      const height = box.offsetHeight;
+      if (NEVER.has(box.tagName) || height < 100 || height > 720) continue;
+      // A picture still loading has no size yet (SMH's), and some are a CSS background (WP's).
+      const media = box.querySelector("img, picture, iframe, video") !== null
+        || [box, ...box.querySelectorAll("div, a, span, figure")].slice(0, 40).some((el) => getComputedStyle(el).backgroundImage.startsWith("url("));
+      const links = box.querySelectorAll("a[href]").length;
+      const words = (box.innerText || "").replace(text, "").trim().length;
+      if (!media || links > 4 || words > 320) continue;
+      const rect = box.getBoundingClientRect();
+      if (rect.bottom <= 0) window.scrollBy(0, -rect.height);
+      box.setAttribute(MARK, "");
+    }
   };
 
   // A strip pinned along the bottom holding one picture and nothing else: an ad drawn by the
@@ -287,7 +350,7 @@
   // Hidden with its backdrop, and scrolling given back. An article about ad
   // blockers isn't pinned and runs longer than a notice, so it's left alone;
   // a cookie notice doesn't talk about blockers, and is answered, not hidden.
-  const WALL_WORDS = /ad[\s-]?block|blokator\w* oglasa|blokiranj\w oglasa|werbeblock|bloqueur de pub|bloqueador de (anuncios|publicidad)|blocc\w (degli |della |di )?(annunci|pubblicit)|advertentieblok|blokad\w reklam|allow ads on|ads help keep|whitelist (us|this site|our site)|turn off your ad|disable your ad/i;
+  const WALL_WORDS = /ad[\s-]?block|blokator\w* oglasa|blokiranj\w oglasa|werbeblock|bloqueur de pub|bloqueador de (anuncios|publicidad)|blocc\w (degli |della |di )?(annunci|pubblicit)|advertentieblok|blokad\w reklam|allow ads on|ads help (us )?(keep|pay|support|fund)|you'?re not here for the ads|whitelist (us|this site|our site)|turn off your ad|disable your ad|consider allowing ads|allow us to (display|show) ads|allowing ads (on|helps|keeps)|please allow ads|(support us|help us) by (allowing|disabling|turning off)|werbung (zulassen|erlauben) und|autorisez les publicit|consenti (la |le )?pubblicit/i;
   const WALL = "data-roko-wall";
   let wallScans = 0, wallTimer = 0, wallStyle = null, pageLoaded = false;
   const pinned = (el) => {
@@ -296,7 +359,7 @@
   };
   const wallCandidates = () => {
     const found = new Set();
-    for (const el of document.querySelectorAll("dialog[open], [role=dialog], [role=alertdialog], [aria-modal=true], [class*=adblock i], [id*=adblock i]")) found.add(el);
+    for (const el of document.querySelectorAll("dialog[open], [role=dialog], [role=alertdialog], [aria-modal=true], [class*=adblock i], [id*=adblock i], [id*=revcatch i], [class*=revcatch i]")) found.add(el);
     // Pinned boxes near the top of the tree: a wall is big, so its height is
     // checked first and the style of only the big ones is asked for.
     const tall = innerHeight * 0.2;
@@ -321,6 +384,8 @@
       (document.head || document.documentElement).appendChild(wallStyle);
     }
     box.setAttribute(WALL, "");
+    // Inline too: a site's own "#wall.is-active { display: block !important }" outranks the class (Revcatch's).
+    box.style.setProperty("display", "none", "important");
     // Its page may have gone with it: don't leave that blank a moment longer than needed.
     setTimeout(checkRefusal, 1500);
     // A backdrop drawn as a box of its own beside it: full-screen, pinned, wordless.
@@ -334,9 +399,82 @@
       + (typeof box.className === "string" && box.className.trim() ? "." + box.className.trim().split(/\s+/).slice(0, 3).join(".") : "");
     handler.postMessage({ host: location.hostname, wall: name }).catch(() => {});
   };
+  // "Get our app" over the page: a sheet or dialog that says app and offers the store or a
+  // deep link, with its own way out ("Por ahora no", "Verder naar de mobiele site", a close
+  // button). roko takes the way out, as a reader would. Never the app link.
+  const APP_WORDS = /\bapps?\b|aplicaci[oó]n|aplicativo|aplica[țt]i|applicazione|\bappli\b|anwendung|sovellus|приложени|застосун|додат(ок|ку)|uygulama|aplikac|aplikas|ứng dụng|εφαρμογ|אפליקצי|تطبيق|برنامه|แอป|アプリ|앱|应用|應用|客户端|客戶端/i;
+  const STAY = /^(not now|no,? thanks|(don'?t|do not|don’t) use (the )?[\w .'’-]{0,24}app|use (the )?(web|mobile|browser) (version|site)|stay on (the )?(web|website|mobile site)|maybe later|later|por ahora no|ahora no|agora n[aã]o|agora não|nicht jetzt|sp[aä]ter|pas maintenant|plus tard|non ora|pi[uù] tardi|niet nu|later|nu acum|mai t[aâ]rziu|nie teraz|p[oó][zź]niej|не сейчас|позже|şimdi değil|daha sonra|continue (to|in|on|with) (the )?(mobile )?(site|website|browser|web)|stay (on|in) (the )?(browser|site|web)|continuar (en|no|na|com) (el |o |a )?(navegador|sitio|site|web|versi[oó]n web)|seguir en (el )?(navegador|sitio)|verder (naar|op) de (mobiele )?(site|website|browser)|im browser (fortfahren|bleiben)|weiter im browser|continuer (sur|dans) (le )?(site|navigateur)|rester sur le site|continua (sul|nel) (sito|browser)|continuă [iî]n browser|kontynuuj w przeglądarce|не зараз|пізніше|продовжити в браузері|залишитися на сайті|продолжить в браузере|остаться на сайте|продолжить на сайте|перейти (в|на) мобильную версию( сайта)?|перейти на сайт|остаться в (мобильной версии|браузере)|в мобильной версии|залишитися в браузері|перейти на мобільну версію( сайту)?|このまま(ブラウザ|web|ウェブ)(版)?(で|を)(見る|続ける|利用する|つかう|使う|見て|閲覧)|ブラウザで(見る|続ける)|今はしない|あとで|모바일 ?웹으로 (볼게요|보기)|웹으로 (볼게요|보기|계속)|다음에|괜찮아요|继续浏览|繼續瀏覽|以后再说|以後再說|tiếp tục trên web|để sau|lanjutkan di browser|nanti saja|ไว้ทีหลัง|όχι τώρα|לא עכשיו|ليس الآن)$/i;
+  const CLOSE = /^(close|cerrar|fechar|fermer|schlie(ß|ss)en|chiudi|zatvori|sluiten|inchide|închide|zamknij|закрыть|закрити|kapat|dismiss|閉じる|닫기|关闭|關閉|đóng|tutup|ปิด|κλείσιμο|סגור|إغلاق|×|✕|✖|x)$/i;
+  const STORE = /apps\.apple\.com|itunes\.apple|play\.google|onelink\.me|adj\.st|app\.link|appsflyer|branch\.io|smart-app|\/app(\/|$|\?)/i;
+  const answered = new WeakSet();
+  const appPromptPass = () => {
+    for (const share of [0.5, 0.7, 0.9]) {
+      let box = null;
+      for (let el = document.elementFromPoint(innerWidth / 2, innerHeight * share); el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+        if (pinned(el) && el.getBoundingClientRect().height >= innerHeight * 0.2) { box = el; break; }
+      }
+      if (!box || answered.has(box)) continue;
+      const text = (box.innerText || "").slice(0, 600);
+      if (text.length > 600 || !APP_WORDS.test(text)) continue;
+      // A box that holds most of what the page says is the page, not a sheet over it: an app
+      // drawn in one pinned full-height box (Whatnot's) mentions its app while it loads.
+      const pageText = ((document.body && document.body.innerText) || "").length;
+      if (pageText > 0 && (box.innerText || "").length >= pageText * 0.8) continue;
+      const controls = [...box.querySelectorAll("button, a, [role=button]")];
+      // Cyrillic words first: `\b` never matches before a Cyrillic letter in a pattern without the u flag.
+      const toApp = controls.some((c) => STORE.test(c.getAttribute("href") || "") || /(^|\s)(скача|открыт|установ|завантаж|відкри|встанов|изтегл|преузм)/i.test(c.innerText || "") || /\b(open|abr|abra|deschide|install|download|get|baixe|scarica|herunterladen|[öo]ffnen|ouvrir|installer|otw[oó]rz|открыть|скачать|indir|завантаж|відкрити|встановити|アプリ(を入手|で開く|をダウンロード)|インストール|ダウンロード|앱(으로|에서)|설치|다운로드|打开|打開|下载|下載|unduh|buka|tải|mở|ดาวน์โหลด|เปิด|λήψη|άνοιγμα|הורד|פתח|تحميل|افتح)/i.test(c.innerText || ""));
+      const label = (c) => (c.innerText || c.getAttribute("aria-label") || c.getAttribute("title") || "").replace(/\s+/g, " ").trim();
+      // A "stay on the web" link says as much as an app link (Hot Pepper's app button is a plain box).
+      if (!toApp && !controls.some((c) => STAY.test(label(c)))) continue;
+      const way = controls.find((c) => STAY.test(label(c))) || controls.find((c) => CLOSE.test(label(c)))
+        || controls.find((c) => !label(c) && /(^|[-_ ])(close|dismiss)([-_ ]|$)/i.test(String(c.className || "") + " " + (c.id || "")));
+      answered.add(box);
+      if (way) way.click();
+      else { box.setAttribute(WALL, ""); if (!wallStyle) { wallStyle = document.createElement("style"); wallStyle.textContent = `[${WALL}]{display:none!important}`; (document.head || document.documentElement).appendChild(wallStyle); } }
+      setTimeout(freeIfAppGone, 600);
+      return;
+    }
+  };
+  // A slim "get our app" bar at the top or bottom with its own close (haberler.com's
+  // "Uygulamayı yükle!"), and a "sign in" sheet over a page that's there behind it
+  // (Healthline's "Continue with Apple / Google"): closed, as a reader would.
+  const SIGN_IN = /\b(sign in|log ?in|sign up|continue with (apple|google|facebook|email))\b|anmelden|einloggen|connexion|se connecter|iniciar sesi[oó]n|inicia sesi[oó]n|entrar|accedi|zaloguj|войти|вход|giriş yap|ログイン|로그인|登录|登入/i;
+  const closeOf = (box) => [...box.querySelectorAll("button, a, [role=button]")].find((c) => {
+    const words = (c.innerText || c.getAttribute("aria-label") || c.getAttribute("title") || "").replace(/\s+/g, " ").trim();
+    return CLOSE.test(words) || /^(close|dismiss|zavřít|zatvori|schließen|fermer|cerrar|chiudi|kapat|閉じる|닫기|关闭)\b/i.test(words)
+      || (!words && /(^|[-_ ])(close|dismiss)([-_ ]|$)/i.test(String(c.className || "") + " " + (c.id || "")));
+  });
+  const smallPromptPass = () => {
+    const seen = new Set();
+    for (const [x, y] of [[0.5, 0.08], [0.5, 0.16], [0.5, 0.86], [0.5, 0.93], [0.5, 0.5], [0.5, 0.7]]) {
+      for (let el = document.elementFromPoint(innerWidth * x, innerHeight * y); el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+        if (seen.has(el) || answered.has(el)) break;
+        seen.add(el);
+        const r = el.getBoundingClientRect();
+        if (r.width < innerWidth * 0.8) continue;
+        const text = (el.innerText || "").slice(0, 400);
+        const slimApp = r.height >= 36 && r.height <= 180 && text.length < 220 && APP_WORDS.test(text) && [...el.querySelectorAll("a, button, [role=button]")].some((c) => STORE.test(c.getAttribute("href") || "") || /\b(open|get|install|download|yükle|indir|pobierz|herunterladen|t[eé]l[eé]charger|descargar|scarica|baixar)\b/i.test(c.innerText || ""));
+        const signIn = pinned(el) && r.height >= innerHeight * 0.3 && r.height < innerHeight * 0.97 && SIGN_IN.test(text) && text.length < 400
+          && (document.body.innerText || "").length > 1500;
+        if (!slimApp && !signIn) continue;
+        const close = closeOf(el);
+        answered.add(el);
+        if (close) { close.click(); setTimeout(freeIfAppGone, 600); }
+        break;
+      }
+    }
+  };
+  // Its sheet locked the page; once it's gone, the lock may stay behind.
+  const freeIfAppGone = () => {
+    const root = document.documentElement, body = document.body;
+    if (body && (isLocked(root) || isLocked(body)) && !overTheContent()) unlock();
+  };
+
   const wallPass = () => {
     wallTimer = 0;
     if (!document.body || wallScans++ > 40) return;
+    try { appPromptPass(); } catch (_) {}
+    try { smallPromptPass(); } catch (_) {}
     for (const el of wallCandidates()) {
       if (el.hasAttribute(WALL) || el.closest(`[${WALL}]`)) continue;
       if (isWall(el)) hideWall(el);

@@ -51,11 +51,16 @@ const PAGES = {
     <button id="yes" onclick="this.dataset.presses=(+this.dataset.presses||0)+1;if(this.dataset.presses==='2')document.querySelector('#wall').remove();document.title=this.dataset.presses">Accetta e continua</button><button>Rifiuta e abbonati</button></div>`,
   // A no that leads to an account form, a no's own page (accept or pay), and a sign-up page that's neither.
   "/account": `<!doctype html><meta charset="utf-8">${LONG}<div style="position:fixed;inset:0;background:#fff">${WORDS}
-    <button id="yes" onclick="this.dataset.pressed=1">Agree</button><button>Disagree and create account</button></div>`,
-  "/preview": `<!doctype html><meta charset="utf-8"><body>We need your consent to use your personal data for advertising.
-    <button id="yes" onclick="this.dataset.pressed=1">Accept and continue</button><button>Subscribe</button>`,
+    <button id="yes" onclick="this.dataset.pressed=1">Agree</button><button id="no" onclick="this.dataset.pressed=1">Disagree and create account</button></div>`,
+  "/info/consent/": `<!doctype html><meta charset="utf-8"><body>We need your consent to use your personal data for advertising.
+    <button id="yes" onclick="this.dataset.pressed=1">Accept and continue</button><button id="no" onclick="this.dataset.pressed=1">Subscribe</button>`,
   "/signup": `<!doctype html><meta charset="utf-8"><body>Create your profile. You consent to our use of personal data.
     <input type="email"><button id="yes" onclick="this.dataset.pressed=1">I agree</button><button>Subscribe</button>`,
+  // A wall whose only yes is a frame of its own, drawn as text (El Confidencial's, from Piano).
+  "/consent-page": `<!doctype html><meta charset="utf-8"><body>We and our partners use cookies. Accept them, or subscribe to read without.
+    <iframe id="yes-frame" width="300" height="60"></iframe>
+    <script>document.getElementById("yes-frame").src = "http://piano.localhost:" + location.port + "/lone-yes";</script>`,
+  "/lone-yes": `<!doctype html><meta charset="utf-8"><body><div onclick="document.title='pressed'">Accept cookies</div>`,
   // Pinned along the bottom: one picture and nothing else, and a real toolbar.
   "/strip": `<!doctype html><meta charset="utf-8">${LONG}<div id="strip" style="position:fixed;bottom:0;left:0;width:100%;height:90px"><img src="/banner-photo.png" width="320" height="90"></div>
     <div id="toolbar" style="position:fixed;bottom:100px;left:0;width:100%;height:50px"><img src="/logo.png" width="40" height="40">Menu</div>`,
@@ -102,6 +107,8 @@ const wildSite = wildKey.replace(".*", ".example");
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "roko-shield-"));
 const context = await chromium.launchPersistentContext(profile, {
   channel: "chromium",
+  // A Chromium already on this Mac, when Playwright's own is a different build.
+  ...(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {}),
   headless: true,
   args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`,
     `--host-resolver-rules=MAP ${namedSite} 127.0.0.1:${port}, MAP ${wildSite} 127.0.0.1:${port}, MAP plain.example 127.0.0.1:${port}`],
@@ -307,16 +314,44 @@ try {
   await twice.close();
 
   for (const [host, path, pressed, what] of [
-    ["account", "/account", true, "a no that leads to an account form gets a yes"],
-    ["preview", "/preview", true, "a no's own page, accept or pay, gets its accept pressed"],
+    ["account", "/account", "away", "a wall whose no leads to an account form is out of the way, its no not pressed"],
+    ["preview", "/info/consent/", true, "a consent page of its own, accept or pay, gets its accept pressed"],
     ["signup", "/signup", false, "a sign-up page that mentions consent isn't taken for a wall"],
   ]) {
     const tab = await context.newPage();
     await tab.goto(at(host, path));
-    await tab.waitForTimeout(2500);
-    check(await tab.evaluate(() => document.querySelector("#yes").dataset.pressed === "1") === pressed, what);
+    await tab.waitForTimeout(6000);
+    const [yes, no, shown] = await tab.evaluate(() => [document.querySelector("#yes"), document.querySelector("#no")]
+      .map((b) => b?.dataset.pressed === "1").concat(document.querySelector("#yes").checkVisibility({ checkVisibilityCSS: true })));
+    // Answered with yes, or, where roko on iPhone takes it for a notice, put out of sight unanswered.
+    check(pressed === "away" ? !no && (yes || !shown) : yes === pressed && !no, what);
     await tab.close();
   }
+
+  const lone = await context.newPage();
+  await lone.goto(at("elconf", "/consent-page"));
+  await lone.waitForTimeout(2600);
+  const yesFrame = lone.frames().find((f) => f.url().includes("/lone-yes"));
+  check(yesFrame && await yesFrame.title() === "pressed", "a frame that is only a yes is pressed when the page is a wall");
+  check((await storage("accepted"))["elconf.localhost"] === "wall", "and the site is remembered as a wall");
+  await lone.close();
+
+  // A page you open yourself loads, even an ad company's own; its ads elsewhere don't.
+  const ownSite = await worker.evaluate(async () => {
+    const test = (type, initiator) => chrome.declarativeNetRequest.testMatchOutcome({
+      url: "https://ads.yahoo.com/", type, ...(initiator ? { initiator } : {}), tabId: -1 })
+      .then(async ({ matchedRules }) => {
+        // Matched rules include allowances: blocked only when the winning rule blocks.
+        for (const { ruleId, rulesetId } of matchedRules) {
+          const rules = await fetch(chrome.runtime.getURL(`rules/${rulesetId}.json`)).then((r) => r.json());
+          if (rules.find((r) => r.id === ruleId)?.action.type === "block") return true;
+        }
+        return false;
+      });
+    return [await test("main_frame"), await test("sub_frame", "http://news.localhost/")];
+  });
+  check(!ownSite[0], "an ad company's own site opens");
+  check(ownSite[1], "and its frame on another site is still blocked");
 
   const strip = await context.newPage();
   await strip.goto(at("strip", "/strip"));

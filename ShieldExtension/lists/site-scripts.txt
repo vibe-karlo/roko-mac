@@ -3248,7 +3248,7 @@ imgtaxi.com	[["aopr","ExoLoader"],["aopr","loadTool"],["aopw","cticodes"],["aopw
 imgtorrnt.in	[["aopr","ExoLoader.serve"],["aopr","document.dispatchEvent"],["aeld","","_0x"]]
 imgtown.*	[["aopr","CustomEvent"],["aopr","exoJsPop101"],["aopr","ExoLoader.addZone"],["aopr","popjs.init"],["aopw","Fingerprint2"],["nowoif"],["acs","addEventListener","-0x"]]
 imgur-com.translate.goog	[["scookie","WHITELISTED_CLOSED","1"]]
-imgur.com	[["set","Object.prototype.has_opted_out_tracking","trueFunc"],["set","ADBLOCKED","false"],["scookie","WHITELISTED_CLOSED","1"],["set","Object.prototype.adsEnabled","false"]]
+imgur.com	[["set","ADBLOCKED","false"],["scookie","WHITELISTED_CLOSED","1"]]
 imgview.*	[["aopr","CustomEvent"],["aopr","exoJsPop101"],["aopr","ExoLoader.addZone"],["aopw","Fingerprint2"],["nowoif"]]
 imgviu.*	[["nowoif"],["acs","addEventListener","-0x"]]
 imgwallet.com	[["acs","jQuery","TestAdBlock"],["aopr","ExoLoader"],["aopr","loadTool"],["aopw","cticodes"],["aopw","imgadbpops"],["acs","document.getElementById","document.write"],["nano-stb","redirect","4000"]]
