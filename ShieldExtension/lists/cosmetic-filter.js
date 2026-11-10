@@ -375,6 +375,14 @@
     const text = (el.innerText || "").trim();
     return text.length >= 20 && text.length <= 1500 && WALL_WORDS.test(text);
   };
+  // A backdrop drawn as a box of its own beside a hidden box: full-screen, pinned, wordless.
+  const hideBackdropBeside = (box) => {
+    for (const sibling of box.parentElement ? box.parentElement.children : []) {
+      if (sibling === box || sibling.hasAttribute(WALL) || (sibling.innerText || "").trim()) continue;
+      const r = sibling.getBoundingClientRect();
+      if (r.width >= innerWidth * 0.9 && r.height >= innerHeight * 0.9 && pinned(sibling)) sibling.setAttribute(WALL, "");
+    }
+  };
   let hidAWall = false;
   const hideWall = (box) => {
     hidAWall = true;
@@ -388,12 +396,7 @@
     box.style.setProperty("display", "none", "important");
     // Its page may have gone with it: don't leave that blank a moment longer than needed.
     setTimeout(checkRefusal, 1500);
-    // A backdrop drawn as a box of its own beside it: full-screen, pinned, wordless.
-    for (const sibling of box.parentElement ? box.parentElement.children : []) {
-      if (sibling === box || sibling.hasAttribute(WALL) || (sibling.innerText || "").trim()) continue;
-      const r = sibling.getBoundingClientRect();
-      if (r.width >= innerWidth * 0.9 && r.height >= innerHeight * 0.9 && pinned(sibling)) sibling.setAttribute(WALL, "");
-    }
+    hideBackdropBeside(box);
     unlock();
     const name = box.tagName.toLowerCase() + (box.id ? "#" + box.id : "")
       + (typeof box.className === "string" && box.className.trim() ? "." + box.className.trim().split(/\s+/).slice(0, 3).join(".") : "");
@@ -403,15 +406,27 @@
   // deep link, with its own way out ("Por ahora no", "Verder naar de mobiele site", a close
   // button). roko takes the way out, as a reader would. Never the app link.
   const APP_WORDS = /\bapps?\b|aplicaci[oó]n|aplicativo|aplica[țt]i|applicazione|\bappli\b|anwendung|sovellus|приложени|застосун|додат(ок|ку)|uygulama|aplikac|aplikas|ứng dụng|εφαρμογ|אפליקצי|تطبيق|برنامه|แอป|アプリ|앱|应用|應用|客户端|客戶端/i;
-  const STAY = /^(not now|no,? thanks|(don'?t|do not|don’t) use (the )?[\w .'’-]{0,24}app|use (the )?(web|mobile|browser) (version|site)|stay on (the )?(web|website|mobile site)|maybe later|later|por ahora no|ahora no|agora n[aã]o|agora não|nicht jetzt|sp[aä]ter|pas maintenant|plus tard|non ora|pi[uù] tardi|niet nu|later|nu acum|mai t[aâ]rziu|nie teraz|p[oó][zź]niej|не сейчас|позже|şimdi değil|daha sonra|continue (to|in|on|with) (the )?(mobile )?(site|website|browser|web)|stay (on|in) (the )?(browser|site|web)|continuar (en|no|na|com) (el |o |a )?(navegador|sitio|site|web|versi[oó]n web)|seguir en (el )?(navegador|sitio)|verder (naar|op) de (mobiele )?(site|website|browser)|im browser (fortfahren|bleiben)|weiter im browser|continuer (sur|dans) (le )?(site|navigateur)|rester sur le site|continua (sul|nel) (sito|browser)|continuă [iî]n browser|kontynuuj w przeglądarce|не зараз|пізніше|продовжити в браузері|залишитися на сайті|продолжить в браузере|остаться на сайте|продолжить на сайте|перейти (в|на) мобильную версию( сайта)?|перейти на сайт|остаться в (мобильной версии|браузере)|в мобильной версии|залишитися в браузері|перейти на мобільну версію( сайту)?|このまま(ブラウザ|web|ウェブ)(版)?(で|を)(見る|続ける|利用する|つかう|使う|見て|閲覧)|ブラウザで(見る|続ける)|今はしない|あとで|모바일 ?웹으로 (볼게요|보기)|웹으로 (볼게요|보기|계속)|다음에|괜찮아요|继续浏览|繼續瀏覽|以后再说|以後再說|tiếp tục trên web|để sau|lanjutkan di browser|nanti saja|ไว้ทีหลัง|όχι τώρα|לא עכשיו|ليس الآن)$/i;
+  // "Continue in Safari" (AllTrails'), "Continue in browser" (Uber Eats'), "Keep using the browser".
+  const STAY = /^(continue (in|on|with|using) (safari|chrome|(the |your )?(mobile )?(browser|web|website|site))|keep using (the )?(browser|web|website)|not now|no,? thanks|(don'?t|do not|don’t) use (the )?[\w .'’-]{0,24}app|use (the )?(web|mobile|browser) (version|site)|stay on (the )?(web|website|mobile site)|maybe later|later|por ahora no|ahora no|agora n[aã]o|agora não|nicht jetzt|sp[aä]ter|pas maintenant|plus tard|non ora|pi[uù] tardi|niet nu|later|nu acum|mai t[aâ]rziu|nie teraz|p[oó][zź]niej|не сейчас|позже|şimdi değil|daha sonra|continue (to|in|on|with) (the )?(mobile )?(site|website|browser|web)|stay (on|in) (the )?(browser|site|web)|continuar (en|no|na|com) (el |o |a )?(navegador|sitio|site|web|versi[oó]n web)|seguir en (el )?(navegador|sitio)|verder (naar|op) de (mobiele )?(site|website|browser)|im browser (fortfahren|bleiben)|weiter im browser|continuer (sur|dans) (le )?(site|navigateur)|rester sur le site|continua (sul|nel) (sito|browser)|continuă [iî]n browser|kontynuuj w przeglądarce|не зараз|пізніше|продовжити в браузері|залишитися на сайті|продолжить в браузере|остаться на сайте|продолжить на сайте|перейти (в|на) мобильную версию( сайта)?|перейти на сайт|остаться в (мобильной версии|браузере)|в мобильной версии|залишитися в браузері|перейти на мобільну версію( сайту)?|このまま(ブラウザ|web|ウェブ)(版)?(で|を)(見る|続ける|利用する|つかう|使う|見て|閲覧)|ブラウザで(見る|続ける)|今はしない|あとで|모바일 ?웹으로 (볼게요|보기)|웹으로 (볼게요|보기|계속)|다음에|괜찮아요|继续浏览|繼續瀏覽|以后再说|以後再說|tiếp tục trên web|để sau|lanjutkan di browser|nanti saja|ไว้ทีหลัง|όχι τώρα|לא עכשיו|ليس الآن)$/i;
   const CLOSE = /^(close|cerrar|fechar|fermer|schlie(ß|ss)en|chiudi|zatvori|sluiten|inchide|închide|zamknij|закрыть|закрити|kapat|dismiss|閉じる|닫기|关闭|關閉|đóng|tutup|ปิด|κλείσιμο|סגור|إغلاق|×|✕|✖|x)$/i;
   const STORE = /apps\.apple\.com|itunes\.apple|play\.google|onelink\.me|adj\.st|app\.link|appsflyer|branch\.io|smart-app|\/app(\/|$|\?)/i;
   const answered = new WeakSet();
+  // A sheet sits over the page: fixed, or a sticky box held to the bottom edge that leaves
+  // the page showing above it. A sticky box held anywhere else is the page's own content
+  // pinned while it scrolls past (rokobrowser.com's screen-tall demo phone, a sticky player),
+  // and what it says about an app is the page talking.
+  const overThePage = (el, r) => {
+    const s = getComputedStyle(el);
+    if (s.position === "fixed") return true;
+    return s.position === "sticky" && s.bottom !== "auto" && Math.abs(r.bottom - innerHeight) <= 2 && r.height < innerHeight * 0.9;
+  };
   const appPromptPass = () => {
     for (const share of [0.5, 0.7, 0.9]) {
       let box = null;
       for (let el = document.elementFromPoint(innerWidth / 2, innerHeight * share); el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
-        if (pinned(el) && el.getBoundingClientRect().height >= innerHeight * 0.2) { box = el; break; }
+        if (!pinned(el)) continue;
+        const r = el.getBoundingClientRect();
+        if (r.height >= innerHeight * 0.2 && overThePage(el, r)) { box = el; break; }
       }
       if (!box || answered.has(box)) continue;
       const text = (box.innerText || "").slice(0, 600);
@@ -426,11 +441,19 @@
       const label = (c) => (c.innerText || c.getAttribute("aria-label") || c.getAttribute("title") || "").replace(/\s+/g, " ").trim();
       // A "stay on the web" link says as much as an app link (Hot Pepper's app button is a plain box).
       if (!toApp && !controls.some((c) => STAY.test(label(c)))) continue;
-      const way = controls.find((c) => STAY.test(label(c))) || controls.find((c) => CLOSE.test(label(c)))
+      // A plain "Continue" beside the browser's name (imgur's "See Imgur in… App: Open / Safari: Continue").
+      const inBrowser = (c) => /^(continue|continuer|continuar|weiter|continua|doorgaan|продолжить)$/i.test(label(c))
+        && /safari|browser|navegador|navigateur|браузер/i.test((c.parentElement && c.parentElement.innerText) || "");
+      const way = controls.find((c) => STAY.test(label(c))) || controls.find(inBrowser) || controls.find((c) => CLOSE.test(label(c)))
         || controls.find((c) => !label(c) && /(^|[-_ ])(close|dismiss)([-_ ]|$)/i.test(String(c.className || "") + " " + (c.id || "")));
       answered.add(box);
       if (way) way.click();
-      else { box.setAttribute(WALL, ""); if (!wallStyle) { wallStyle = document.createElement("style"); wallStyle.textContent = `[${WALL}]{display:none!important}`; (document.head || document.documentElement).appendChild(wallStyle); } }
+      else {
+        box.setAttribute(WALL, "");
+        if (!wallStyle) { wallStyle = document.createElement("style"); wallStyle.textContent = `[${WALL}]{display:none!important}`; (document.head || document.documentElement).appendChild(wallStyle); }
+        // Its dimming layer too, or the page stays grey and locked behind a sheet that's gone (imgur's).
+        hideBackdropBeside(box);
+      }
       setTimeout(freeIfAppGone, 600);
       return;
     }

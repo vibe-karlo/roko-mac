@@ -146,6 +146,21 @@
     return (details) => parts.every(([key, test]) => test(String(details[key] ?? "")));
   };
 
+  // The body a faked request answers with: "length:101" or "length:100-200" is that much text, as uBlock Origin
+  // gives (Ad-Shield's loader on dogdrip.net checks the length, and an empty answer made it wipe the page);
+  // "true:…" and nothing are empty; anything else is itself.
+  const fakeBody = (body) => {
+    const length = /^length:(\d+)(?:-(\d+))?$/.exec(body);
+    if (length) {
+      const low = Number(length[1]), high = Number(length[2] || length[1]);
+      const n = Math.min(500000, low + Math.floor(Math.random() * (high - low + 1)));
+      let text = "";
+      while (text.length < n) text += Math.random().toString(36).slice(2);
+      return text.slice(0, n);
+    }
+    return body === "" || body.startsWith("true:") ? "" : body;
+  };
+
   const SCRIPTS = {
     set: (chain, raw = "") => {
       const value = constant(raw);
@@ -199,10 +214,10 @@
         const input = args[0], options = args[1] || {};
         const details = { url: input instanceof Request ? input.url : String(input), method: options.method || (input instanceof Request ? input.method : "GET"), ...options };
         if (!matches(details)) return Reflect.apply(target, self, args);
-        return Promise.resolve(new Response(body === "" || body.startsWith("length:") || body.startsWith("true:") ? "" : body, { status: 200, statusText: "OK" }));
+        return Promise.resolve(new Response(fakeBody(body), { status: 200, statusText: "OK" }));
       });
     },
-    "no-xhr-if": (spec = "") => {
+    "no-xhr-if": (spec = "", body = "") => {
       if (spec === "") return;
       const matches = requestMatcher(spec);
       const faked = new WeakSet();
@@ -212,7 +227,8 @@
       });
       wrap(XMLHttpRequest.prototype, "send", (target, self, args) => {
         if (!faked.has(self)) return Reflect.apply(target, self, args);
-        for (const [name, value] of [["readyState", 4], ["status", 200], ["statusText", "OK"], ["response", ""], ["responseText", ""]]) {
+        const text = fakeBody(body);
+        for (const [name, value] of [["readyState", 4], ["status", 200], ["statusText", "OK"], ["response", text], ["responseText", text]]) {
           Object.defineProperty(self, name, { configurable: true, value });
         }
         setTimeout(() => {
