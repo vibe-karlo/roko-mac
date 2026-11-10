@@ -78,6 +78,10 @@ const PAGES = {
 const server = http.createServer((req, res) => {
   res.setHeader("content-type", "text/html");
   if (PAGES[req.url]) return res.end(PAGES[req.url]);
+  if (req.url === "/trusted") {
+    res.setHeader("content-security-policy", "require-trusted-types-for 'script'");
+    return res.end(`<!doctype html><meta charset="utf-8"><script>window.cutRan = true; // ${cutWord}</script><script>window.keptRan = true;</script><body>A page`);
+  }
   // A site that allows no inline styles at all.
   if (req.url.startsWith("/strict")) res.setHeader("content-security-policy", "default-src 'self'; style-src 'self'");
   res.end(req.url.startsWith("/ok") ? "ok" : PAGE);
@@ -102,6 +106,10 @@ const simple = (wild) => rules.map(([key, calls]) => [key, /^\[\["set","(\w+)","
   .find(([key, name]) => name && (wild ? key.endsWith(".*") : key.endsWith(".com")));
 const [namedKey, namedVar] = simple(false), [wildKey, wildVar] = simple(true);
 const namedSite = "www." + namedKey;
+// And one that takes a script out by its text, served as a page that requires Trusted Types (as YouTube's does).
+const [cutKey, cutWord] = rules.map(([key, calls]) => [key, /^\[\["rmnt","script","(\w+)"\]\]$/.exec(calls)?.[1]])
+  .find(([key, word]) => word && key.endsWith(".com"));
+const cutSite = "www." + cutKey;
 const wildSite = wildKey.replace(".*", ".example");
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "roko-shield-"));
@@ -111,7 +119,7 @@ const context = await chromium.launchPersistentContext(profile, {
   ...(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {}),
   headless: true,
   args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`,
-    `--host-resolver-rules=MAP ${namedSite} 127.0.0.1:${port}, MAP ${wildSite} 127.0.0.1:${port}, MAP plain.example 127.0.0.1:${port}`],
+    `--host-resolver-rules=MAP ${namedSite} 127.0.0.1:${port}, MAP ${wildSite} 127.0.0.1:${port}, MAP plain.example 127.0.0.1:${port}, MAP ${cutSite} 127.0.0.1:${port}`],
 });
 
 let failures = 0;
@@ -398,6 +406,18 @@ try {
   await refusing.waitForTimeout(8500);
   check((await storage("softAds")).length === 0 && (await storage("adsAllowed")).length === 0, "and the page doesn't win it back");
   await refusing.close();
+
+  // A script taken out by its text on a page that requires Trusted Types, with no error from Shield.
+  const trusted = await context.newPage();
+  const thrown = [];
+  trusted.on("pageerror", (error) => thrown.push(error.stack || error.message));
+  trusted.on("console", (message) => { if (message.type() === "error") thrown.push(JSON.stringify(message.location()) + message.text()); });
+  await trusted.goto(`http://${cutSite}/trusted`);
+  await trusted.waitForTimeout(800);
+  const ran = await trusted.evaluate(() => [window.cutRan === true, window.keptRan === true]);
+  check(!ran[0] && ran[1], `a script is taken out by its text where Trusted Types are required (${cutSite})`);
+  check(!thrown.some((line) => line.includes("chrome-extension://")), "and Shield reports no error there");
+  await trusted.close();
 
   // uBlock Origin's site rules: before the page runs, on sites with a rule only.
   const ruled = await context.newPage();

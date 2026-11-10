@@ -66,6 +66,17 @@
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run, { once: true });
     else run();
   };
+  // A page that requires Trusted Types (YouTube's) refuses plain text for a script's
+  // contents: the change goes in through a policy of this script's own, made once, or,
+  // where the page allows no new policy, not at all, quietly.
+  let policy;
+  const scriptText = (value) => {
+    if (policy === undefined) {
+      policy = null;
+      try { if (window.trustedTypes && window.trustedTypes.createPolicy) policy = window.trustedTypes.createPolicy("roko-site-scripts", { createScript: (text) => text }); } catch {}
+    }
+    return policy ? policy.createScript(value) : value;
+  };
   // Scripts the parser is reading: an observer sees each before it runs.
   const nodeText = (nodeName, change) => {
     const wanted = pattern(nodeName.startsWith("/") ? nodeName : `/^${nodeName.replace(/[^\w-]/g, "")}$/i`);
@@ -77,7 +88,9 @@
       if (node.nodeType !== 1 || done.has(node) || !wanted.test(node.nodeName) || !node.firstChild) return;
       const before = node.textContent;
       const after = change(before);
-      if (after !== before) { done.add(node); node.textContent = after; }
+      if (after === before) return;
+      done.add(node);
+      try { node.textContent = scriptText(after); } catch {}
     };
     const observer = new MutationObserver((records) => {
       for (const record of records) {
@@ -180,7 +193,10 @@
         if (matches(script.textContent || script.src)) throw new ReferenceError(chain);
       };
       atChain(window, chain, (owner, name) => {
-        let descriptor; try { descriptor = Object.getOwnPropertyDescriptor(owner, name); } catch {}
+        // Up the prototype chain too: document.createElement is Document.prototype's, and read as document's own
+        // it came back undefined, so every acs rule on it (161 sites) took the function away from the page.
+        let descriptor;
+        try { for (let o = owner; o && !descriptor; o = Object.getPrototypeOf(o)) descriptor = Object.getOwnPropertyDescriptor(o, name); } catch {}
         let value = descriptor && "value" in descriptor ? descriptor.value : undefined;
         define(owner, name, {
           get() { check(); return descriptor && descriptor.get ? descriptor.get.call(this) : value; },
